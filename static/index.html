@@ -1,0 +1,1729 @@
+<!DOCTYPE html>
+<html lang="es-VE" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cuentas Por Pagar | Dashboard</title>
+    <!-- Modern Typography: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- SVG Icons (Lucide via CDN) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js for data visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo-container">
+                    <i data-lucide="wallet" class="logo-icon"></i>
+                </div>
+                <h2>Finanzas</h2>
+                <button id="sidebarToggle" class="btn-icon" style="margin-left: auto;">
+                    <i data-lucide="menu"></i>
+                </button>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#dashboard" class="nav-item active" data-view="dashboard">
+                    <i data-lucide="layout-dashboard"></i>
+                    <span>Cuentas por Pagar</span>
+                </a>
+                <a href="#debit-notes" class="nav-item" data-view="debit-notes">
+                    <i data-lucide="file-minus"></i>
+                    <span>Notas de Débito</span>
+                </a>
+                <a href="#compras" class="nav-item" data-view="compras">
+                    <i data-lucide="shopping-cart"></i>
+                    <span>Compras por Prov.</span>
+                </a>
+                <a href="#aging" class="nav-item" data-view="aging">
+                    <i data-lucide="bar-chart-2"></i>
+                    <span>Antigüedad (Aging)</span>
+                </a>
+                <div class="nav-group">
+                    <div class="nav-group-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <i data-lucide="trending-up"></i>
+                        <span>Pronósticos</span>
+                        <i data-lucide="chevron-down" class="nav-group-icon"></i>
+                    </div>
+                    <div class="nav-group-items">
+                        <a href="#cashflow" class="nav-item nav-item-sub" data-view="cashflow">Pronóstico Salidas</a>
+
+                        <!-- Nested Group: Ventas -->
+                        <div class="nav-group nested-group" style="margin-left: 1rem;">
+                            <div class="nav-group-header" onclick="this.parentElement.classList.toggle('expanded')"
+                                style="padding-left: 0.5rem; font-size: 0.85rem;">
+                                <i data-lucide="line-chart" style="width: 14px; height: 14px;"></i>
+                                <span>Pronóstico Ventas</span>
+                                <i data-lucide="chevron-down" class="nav-group-icon"
+                                    style="width: 14px; height: 14px;"></i>
+                            </div>
+                            <div class="nav-group-items">
+                                <a href="#forecast-sales" class="nav-item nav-item-sub" data-view="forecast-sales"
+                                    style="padding-left: 2rem;">Modelo Predictivo</a>
+                                <a href="#forecast-events" class="nav-item nav-item-sub" data-view="forecast-events"
+                                    style="padding-left: 2rem;">Variables Exógenas</a>
+                            </div>
+                        </div>
+
+                        <!-- Nested Group: Flujo Consolidado -->
+                        <div class="nav-group nested-group" style="margin-left: 1rem;">
+                            <div class="nav-group-header" onclick="this.parentElement.classList.toggle('expanded')"
+                                style="padding-left: 0.5rem; font-size: 0.85rem;">
+                                <i data-lucide="boxes" style="width: 14px; height: 14px;"></i>
+                                <span>Flujo Consolidado</span>
+                                <i data-lucide="chevron-down" class="nav-group-icon"
+                                    style="width: 14px; height: 14px;"></i>
+                            </div>
+                            <div class="nav-group-items">
+                                <a href="#forecast-consolidated" class="nav-item nav-item-sub"
+                                    data-view="forecast-consolidated" style="padding-left: 2rem;">Dashboard Flujo</a>
+                                <a href="#cashflow-params" class="nav-item nav-item-sub" data-view="cashflow-params"
+                                    style="padding-left: 2rem;">Parámetros Inicio</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="nav-group">
+                    <div class="nav-group-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <i data-lucide="wallet"></i>
+                        <span>Gastos Previstos</span>
+                        <i data-lucide="chevron-down" class="nav-group-icon"></i>
+                    </div>
+                    <div class="nav-group-items">
+                        <a href="#expense-templates" class="nav-item nav-item-sub"
+                            data-view="expense-templates">Plantillas</a>
+                        <a href="#expense-batch" class="nav-item nav-item-sub" data-view="expense-batch">Lote
+                            Mensual</a>
+                    </div>
+                </div>
+                <a href="#dpo" class="nav-item" data-view="dpo">
+                    <i data-lucide="clock"></i>
+                    <span>DPO</span>
+                </a>
+                <a href="#sedematri" class="nav-item" data-view="sedematri">
+                    <i data-lucide="landmark"></i>
+                    <span>Impuestos (SEDEMATRI)</span>
+                </a>
+                <a href="#retenciones" class="nav-item" data-view="retenciones">
+                    <i data-lucide="receipt"></i>
+                    <span>Retenciones IVA</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard View -->
+            <div id="view-dashboard" class="view-section active">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Cuentas por Pagar</h1>
+                        <p class="subtitle">Gestión de obligaciones y pagos a proveedores</p>
+                    </div>
+                    <div class="header-right">
+                        <div class="search-container">
+                            <i data-lucide="search" class="search-icon"></i>
+                            <input type="text" id="searchInput" placeholder="Buscar documento o proveedor..."
+                                aria-label="Buscar cuentas por pagar">
+                        </div>
+                    </div>
+                </header>
+
+                <div class="dashboard-stats">
+                    <div class="stat-card glassmorphism">
+                        <div class="stat-icon-wrapper blue">
+                            <i data-lucide="file-text"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Total Documentos</h3>
+                            <p id="totalDocs">0</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glassmorphism">
+                        <div class="stat-icon-wrapper red">
+                            <i data-lucide="trending-down"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Saldo Total (Bs)</h3>
+                            <p id="totalSaldoBs">Bs 0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glassmorphism">
+                        <div class="stat-icon-wrapper green">
+                            <i data-lucide="dollar-sign"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Saldo Total (USD)</h3>
+                            <p id="totalSaldoUsd">$ 0.00</p>
+                        </div>
+                    </div>
+                    <!-- Selection summary card -->
+                    <div class="stat-card glassmorphism active-selection-card">
+                        <div class="stat-icon-wrapper purple">
+                            <i data-lucide="check-square"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Seleccionadas a Pagar</h3>
+                            <p id="selectedTotalBs">Bs 0.00</p>
+                            <span class="sub-text" id="selectedTotalUsd">$ 0.00</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Payment Planning Action Bar (Hidden by default) -->
+                <section id="planningActionBar" class="planning-action-bar glassmorphism" style="display: none;">
+                    <div class="planning-controls">
+                        <div class="input-group">
+                            <label for="planFecha">Fecha Planificada:</label>
+                            <input type="date" id="planFecha" class="form-control">
+                        </div>
+                        <div class="input-group">
+                            <label for="planBanco">Banco a usar:</label>
+                            <select id="planBanco" class="form-control">
+                                <option value="">Seleccione Banco...</option>
+                                <option value="BANESCO">Banesco</option>
+                                <option value="BDV">Banco de Venezuela</option>
+                                <option value="Banco de Venezuela(2)">Banco de Venezuela(2)</option>
+                                <option value="MERCANTIL">Mercantil</option>
+                                <option value="PROVINCIAL">Provincial</option>
+                            </select>
+                        </div>
+                        <button id="submitPlanBtn" class="btn btn-primary">
+                            <i data-lucide="calendar-check"></i>
+                            Planificar Pago
+                        </button>
+                        <button id="unplanBtn" class="btn btn-secondary text-warning"
+                            style="color: var(--warning); border-color: rgba(245, 158, 11, 0.4);">
+                            <i data-lucide="calendar-x"></i>
+                            Reversar
+                        </button>
+                        <button id="editInvoiceBtn" class="btn btn-secondary"
+                            style="color: var(--primary-accent); border-color: rgba(99,102,241,0.4); display:none;">
+                            <i data-lucide="edit-3"></i>
+                            Editar Factura
+                        </button>
+                        <button id="btnGenerarRetencion" class="btn btn-secondary"
+                    style="color: #eab308; border-color: rgba(234,179,8,0.4); display:none; align-items: center; gap: 0.5rem;">
+                            <i data-lucide="receipt"></i>
+                            Generar Retención
+                        </button>
+                        <button id="btnPagoMultiple" class="btn btn-secondary"
+                    style="color: #10b981; border-color: rgba(16,185,129,0.4); display:none; align-items: center; gap: 0.5rem;">
+                            <i data-lucide="banknote"></i>
+                            Pago Múltiple
+                        </button>
+                        <button id="cancelPlanBtn" class="btn btn-secondary">Cancelar</button>
+                    </div>
+                </section>
+
+                <section class="table-section glassmorphism">
+                    <div class="table-header">
+                        <h2>Registros Recientes</h2>
+                        <div class="table-actions" style="display: flex; gap: 1rem; align-items: flex-end;">
+                            <div class="date-filter" style="display: flex; gap: 0.5rem; align-items: center;">
+                                <label for="filterDate" style="margin: 0; font-weight: 500;">Desde:</label>
+                                <input type="date" id="filterDate" class="form-control" style="width: auto;">
+                                <label for="filterDateHasta" style="margin: 0; font-weight: 500;">Hasta:</label>
+                                <input type="date" id="filterDateHasta" class="form-control" style="width: auto;">
+                            </div>
+                            <button id="exportCxpBtn" class="btn btn-secondary" title="Exportar a CSV">
+                                <i data-lucide="download"></i>
+                                Exportar
+                            </button>
+                            <button id="openProvidersBtn" class="btn btn-secondary"
+                                title="Configurar Parámetros Indexación">
+                                <i data-lucide="settings"></i>
+                                Proveedores
+                            </button>
+                            <button id="refreshBtn" class="btn btn-primary"
+                                style="height: 38px; display: flex; align-items: center;">
+                                <i data-lucide="refresh-cw"></i>
+                                Actualizar
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table id="cxpTable">
+                            <thead>
+                                <tr>
+                                    <th class="col-checkbox"><input type="checkbox" id="selectAllCheckbox"></th>
+                                    <th class="sortable" data-sort="FechaE">Emisión <i data-lucide="arrow-up-down"
+                                            class="sort-icon"></i></th>
+                                    <th class="sortable" data-sort="FechaV">Vencimiento <i data-lucide="arrow-up-down"
+                                            class="sort-icon"></i></th>
+                                    <th class="sortable" data-sort="NumeroD">Nro. Factura <i data-lucide="arrow-up-down"
+                                            class="sort-icon"></i></th>
+                                    <th class="sortable" data-sort="NumeroD_SAPAGCXP">Doc. de Pago <i
+                                            data-lucide="arrow-up-down" class="sort-icon"></i></th>
+                                    <th class="sortable" data-sort="Descrip">Proveedor <i data-lucide="arrow-up-down"
+                                            class="sort-icon"></i></th>
+                                    <th class="sortable" data-sort="Saldo">Saldo (Bs) <i data-lucide="arrow-up-down"
+                                            class="sort-icon"></i></th>
+                                    <th>Saldo (USD)</th>
+                                    <th style="min-width: 140px;">
+                                        Estado
+                                        <div class="status-filters"
+                                            style="font-weight: normal; font-size: 0.75rem; margin-top: 0.3rem; display: flex; flex-direction: column; gap: 0.3rem; text-align: left;">
+                                            <select id="filterStatusBase" class="form-control"
+                                                style="font-size: 0.7rem; padding: 2px; height: auto;">
+                                                <option value="TODOS" selected>Todos los registros</option>
+                                                <option value="TODOS_ACTIVOS">Activos (Pend+Venc)</option>
+                                                <option value="PENDIENTE">Sólo Pendientes</option>
+                                                <option value="VENCIDO">Sólo Vencidos</option>
+                                                <option value="PAGADO">Pagados (Saldo 0)</option>
+                                                <option value="CONTADO_ERROR">⚠️ CONTADO (Corregir)</option>
+                                            </select>
+                                            <div
+                                                style="border-top: 1px dashed var(--border-color); margin-top: 2px; padding-top: 4px; display: flex; flex-direction: column; gap: 0.2rem;">
+                                                <label
+                                                    style="cursor: pointer; display: flex; align-items: center; gap: 0.2rem;"
+                                                    title="Tiene asignación de banco">
+                                                    <input type="checkbox" id="filterAttrPlanificado"
+                                                        value="Planificado"> Planificados
+                                                </label>
+                                                <label
+                                                    style="cursor: pointer; display: flex; align-items: center; gap: 0.2rem;"
+                                                    title="Tiene pagos parciales">
+                                                    <input type="checkbox" id="filterAttrAbonos" value="Abonos"> Con
+                                                    Abonos
+                                                </label>
+                                                <label
+                                                    style="cursor: pointer; display: flex; align-items: center; gap: 0.2rem;"
+                                                    title="Tiene impuestos retenidos">
+                                                    <input type="checkbox" id="filterAttrRetenciones"
+                                                        value="Retenciones"> C/ Retenciones
+                                                </label>
+                                                <label
+                                                    style="cursor: pointer; display: flex; align-items: center; gap: 0.2rem;"
+                                                    title="Genera N/D por excedente Bs">
+                                                    <input type="checkbox" id="filterAttrCDebito"
+                                                        value="CDebito"> C/Debito
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </th>
+                                    <th>Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tableBody">
+                                <!-- Data initialized by JS -->
+                                <tr>
+                                    <td colspan="9" class="loading-cell">
+                                        <div class="loader"></div>
+                                        <p>Cargando datos...</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div> <!-- End Dashboard View -->
+
+            <!-- Debit Notes View -->
+            <div id="view-debit-notes" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Notas de Débito Pendientes</h1>
+                        <p class="subtitle">Diferenciales por indexación de facturas abonadas</p>
+                    </div>
+                </header>
+
+                <section class="table-section glassmorphism" style="margin-top: 1.5rem;">
+                    <div class="table-header">
+                        <h2>Relación de Facturas</h2>
+                        <div class="table-actions" style="display: flex; gap: 1rem; align-items: flex-end;">
+                            <div id="debitNotesActionBar"
+                                style="display: none; align-items: center; gap: 0.5rem; background: rgba(59, 130, 246, 0.1); padding: 0.5rem 1rem; border-radius: var(--radius-md); border: 1px solid rgba(59, 130, 246, 0.2);">
+                                <span style="font-size: 0.85rem; font-weight: 500; color: var(--primary-accent);"><span
+                                        id="dnSelectedCount">0</span> seleccionadas</span>
+                                <button id="btnSendDebitNotes" class="btn btn-primary"
+                                    style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">
+                                    <i data-lucide="mail"></i> Solicitar N/D por Correo
+                                </button>
+                                <button id="btnRegisterDebitNote" class="btn btn-secondary"
+                                    style="padding: 0.4rem 0.8rem; font-size: 0.85rem; color: var(--success); border-color: var(--success);">
+                                    <i data-lucide="check-circle"></i> Recibir N/D
+                                </button>
+                            </div>
+                            <button id="refreshDebitNotesBtn" class="btn btn-secondary">
+                                <i data-lucide="refresh-cw"></i> Actualizar
+                            </button>
+                            <button id="exportDebitNotesBtn" class="btn btn-secondary" title="Exportar a Excel">
+                                <i data-lucide="download"></i> Exportar
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table id="debitNotesTable">
+                            <thead>
+                                <tr>
+                                    <th class="col-checkbox"><input type="checkbox" id="dnSelectAll"></th>
+                                    <th>Proveedor</th>
+                                    <th>Nro Factura</th>
+                                    <th>Emisión</th>
+                                    <th style="text-align: right;">M. Orig (Bs)</th>
+                                    <th style="text-align: right;">Total Pagado (Bs)</th>
+                                    <th style="text-align: right; color: var(--danger);">Dif. N/D (Bs)</th>
+                                    <th style="text-align: right; color: var(--warning);">Reten (Bs)</th>
+                                    <th style="text-align: center;">Estatus</th>
+                                    <th>Nro N/D</th>
+                                </tr>
+                            </thead>
+                            <tbody id="debitNotesTableBody">
+                                <tr>
+                                    <td colspan="10" class="loading-cell">
+                                        <div class="loader"></div>
+                                        <p>Consultando base de datos...</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Compras View -->
+            <div id="view-compras" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Compras por Proveedor</h1>
+                        <p class="subtitle">Análisis de participación por proveedor</p>
+                    </div>
+                </header>
+
+                <div class="stats-grid">
+                    <div class="stat-card glassmorphism" style="grid-column: span 3;">
+                        <div class="table-actions"
+                            style="display: flex; gap: 1rem; align-items: center; padding: 1rem;">
+                            <div class="date-filter" style="display: flex; gap: 0.5rem; align-items: center;">
+                                <label for="comprasDesde" style="margin: 0; font-weight: 500;">Desde:</label>
+                                <input type="date" id="comprasDesde" class="form-control" style="width: auto;">
+                                <label for="comprasHasta" style="margin: 0; font-weight: 500;">Hasta:</label>
+                                <input type="date" id="comprasHasta" class="form-control" style="width: auto;">
+                                <button id="refreshComprasBtn" class="btn btn-primary btn-sm">
+                                    <i data-lucide="refresh-cw"></i> Actualizar
+                                </button>
+                                <button id="exportComprasBtn" class="btn btn-secondary btn-sm" title="Exportar a CSV">
+                                    <i data-lucide="download"></i> Exportar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container glassmorphism" style="height: 400px; margin-bottom: 2rem; padding: 1.5rem;">
+                    <canvas id="comprasChart"></canvas>
+                </div>
+
+                <section class="table-section glassmorphism">
+                    <div class="table-responsive">
+                        <table id="comprasTable">
+                            <thead>
+                                <tr>
+                                    <th>Proveedor</th>
+                                    <th class="amount">Monto Total (USD)</th>
+                                    <th class="amount">Participación (%)</th>
+                                    <th class="amount">Cant. Documentos</th>
+                                </tr>
+                            </thead>
+                            <tbody id="comprasBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Aging View -->
+            <div id="view-aging" class="view-section">
+                <header class="top-header">
+                    <div class="header-right">
+                        <button id="exportAgingBtn" class="btn btn-secondary" title="Exportar a CSV">
+                            <i data-lucide="download"></i> Exportar
+                        </button>
+                    </div>
+                </header>
+
+                <div class="dashboard-stats" style="margin-bottom: 2rem;">
+                    <div class="stat-card glassmorphism">
+                        <div class="stat-icon-wrapper" style="background: rgba(34, 197, 94, 0.1); color: #22c55e;">
+                            <i data-lucide="shield-check"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Por Vencer</h3>
+                            <p class="us-amount" id="agingSummaryPorVencer" style="font-size: 1.5rem;">$0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glassmorphism">
+                        <div class="stat-icon-wrapper" style="background: rgba(234, 179, 8, 0.1); color: #eab308;">
+                            <i data-lucide="alert-circle"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>1 - 30 Días</h3>
+                            <p class="us-amount" id="agingSummary1_30" style="font-size: 1.5rem;">$0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glassmorphism">
+                        <div class="stat-icon-wrapper" style="background: rgba(249, 115, 22, 0.1); color: #f97316;">
+                            <i data-lucide="alert-triangle"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>31 - 60 Días</h3>
+                            <p class="us-amount" id="agingSummary31_60" style="font-size: 1.5rem;">$0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glassmorphism">
+                        <div class="stat-icon-wrapper" style="background: rgba(239, 68, 68, 0.1); color: #ef4444;">
+                            <i data-lucide="flame"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>61 - 90 Días</h3>
+                            <p class="us-amount" id="agingSummary61_90" style="font-size: 1.5rem;">$0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glassmorphism">
+                        <div class="stat-icon-wrapper" style="background: rgba(185, 28, 28, 0.1); color: #b91c1c;">
+                            <i data-lucide="skull"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>+ 90 Días</h3>
+                            <p class="us-amount" id="agingSummaryMas90" style="font-size: 1.5rem;">$0.00</p>
+                        </div>
+                    </div>
+                    <div class="stat-card glassmorphism">
+                        <div class="stat-icon-wrapper" style="background: rgba(59, 130, 246, 0.1); color: #3b82f6;">
+                            <i data-lucide="wallet"></i>
+                        </div>
+                        <div class="stat-info">
+                            <h3>Total Deuda USD</h3>
+                            <p class="us-amount" id="agingSummaryTotal" style="font-size: 1.5rem;">$0.00</p>
+                        </div>
+                    </div>
+                </div>
+
+                <section class="table-section glassmorphism">
+                    <div class="table-responsive">
+                        <table id="agingTable">
+                            <thead>
+                                <tr>
+                                    <th>Proveedor</th>
+                                    <th>Por Vencer USD</th>
+                                    <th>1 - 30 Días USD</th>
+                                    <th>31 - 60 Días USD</th>
+                                    <th>61 - 90 Días USD</th>
+                                    <th>+ 90 Días USD</th>
+                                    <th>Total Deuda USD</th>
+                                </tr>
+                            </thead>
+                            <tbody id="agingBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Cashflow View -->
+            <div id="view-cashflow" class="view-section">
+                <header class="top-header" style="flex-wrap: wrap; gap: 1rem;">
+                    <div class="header-left">
+                        <h1>Pronóstico de Salidas</h1>
+                        <p class="subtitle">Flujo de caja requerido (Vista diaria)</p>
+                    </div>
+                    <div class="header-right">
+                        <div class="table-actions" style="display: flex; gap: 1rem; align-items: flex-end;">
+                            <div class="date-filter" style="display: flex; gap: 0.5rem; align-items: center;">
+                                <label for="cashflowDateDesde" style="margin: 0; font-weight: 500;">Desde:</label>
+                                <input type="date" id="cashflowDateDesde" class="form-control" style="width: auto;">
+                                <label for="cashflowDateHasta" style="margin: 0; font-weight: 500;">Hasta:</label>
+                                <input type="date" id="cashflowDateHasta" class="form-control" style="width: auto;">
+                            </div>
+                            <button id="refreshCashflowBtn" class="btn btn-primary"
+                                style="height: 38px; display: flex; align-items: center;">
+                                <i data-lucide="refresh-cw"></i>
+                                Actualizar
+                            </button>
+                        </div>
+                    </div>
+                </header>
+
+                <!-- Chart Section -->
+                <section class="chart-section glassmorphism" style="margin-bottom: 2rem;">
+                    <div style="height: 300px; width: 100%;">
+                        <canvas id="cashflowChart"></canvas>
+                    </div>
+                    <div id="cashflowUsdTotal" class="usd-total"
+                        style="margin-top: 0.5rem; font-weight: 500; color: var(--text-primary);"></div>
+                </section>
+
+                <section class="table-section glassmorphism">
+                    <div class="table-responsive">
+                        <table id="cashflowTable">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th class="amount" style="color: #22c55e;">Proveedores USD</th>
+                                    <th class="amount" style="color: #fb923c;">Farmacia USD</th>
+                                    <th class="amount" style="color: #c026d3;">Personales USD</th>
+                                    <th class="amount" style="font-weight: bold;">Total USD</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cashflowBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Forecast Sales View -->
+            <div id="view-forecast-sales" class="view-section">
+                <header class="top-header" style="flex-wrap: wrap; gap: 1rem;">
+                    <div class="header-left">
+                        <h1>Pronóstico de Ingresos (Ventas)</h1>
+                        <p class="subtitle">Predicción basada en algoritmo Prophet (Próximos 21 días)</p>
+                    </div>
+                    <div class="header-right">
+                        <div class="table-actions" style="display: flex; gap: 1rem; align-items: flex-end;">
+                            <div class="date-filter" style="display: flex; gap: 0.5rem; align-items: center;">
+                                <label for="fsDateDesde" style="margin: 0; font-weight: 500;">Desde:</label>
+                                <input type="date" id="fsDateDesde" class="form-control" style="width: auto;">
+                                <label for="fsDateHasta" style="margin: 0; font-weight: 500;">Hasta:</label>
+                                <input type="date" id="fsDateHasta" class="form-control" style="width: auto;">
+                            </div>
+                            <button id="refreshForecastSalesBtn" class="btn btn-primary"
+                                style="height: 38px; display: flex; align-items: center;">
+                                <i data-lucide="refresh-cw"></i> Actualizar
+                            </button>
+                        </div>
+                    </div>
+                </header>
+                <section class="chart-section glassmorphism" style="margin-bottom: 2rem;">
+                    <div style="height: 300px; width: 100%;">
+                        <canvas id="forecastSalesChart"></canvas>
+                    </div>
+                    <div id="forecastSalesUsdTotal" class="usd-total"
+                        style="margin-top: 0.5rem; font-weight: 500; color: var(--text-primary);"></div>
+                </section>
+                <section class="table-section glassmorphism">
+                    <div class="table-responsive">
+                        <table id="forecastSalesTable">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Ventas Proyectadas (Bs)</th>
+                                    <th>Ventas Proyectadas (USD)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="forecastSalesBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Forecast Consolidated View -->
+            <div id="view-forecast-consolidated" class="view-section">
+                <header class="top-header" style="flex-wrap: wrap; gap: 1rem;">
+                    <div class="header-left">
+                        <h1>Flujo Consolidado Diario</h1>
+                        <p class="subtitle">Proyección neta de Ventas vs Pagos planificados</p>
+                    </div>
+                    <div class="header-right">
+                        <div class="table-actions" style="display: flex; gap: 1rem; align-items: flex-end;">
+                            <div class="date-filter" style="display: flex; gap: 0.5rem; align-items: center;">
+                                <label for="fcDateDesde" style="margin: 0; font-weight: 500;">Desde:</label>
+                                <input type="date" id="fcDateDesde" class="form-control" style="width: auto;">
+                                <label for="fcDateHasta" style="margin: 0; font-weight: 500;">Hasta:</label>
+                                <input type="date" id="fcDateHasta" class="form-control" style="width: auto;">
+                            </div>
+
+                            <!-- Retardo Bancario Toggle -->
+                            <div class="toggle-container"
+                                style="display: flex; align-items: center; gap: 0.5rem; background: var(--glass-bg); border: 1px solid var(--glass-border); padding: 0.5rem 1rem; border-radius: 8px;">
+                                <label for="fcToggleDelay"
+                                    style="margin: 0; font-weight: 500; cursor: pointer; color: var(--text-primary);">Simular
+                                    Diferido</label>
+                                <label class="switch">
+                                    <input type="checkbox" id="fcToggleDelay">
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+
+                            <button id="refreshForecastConsolidatedBtn" class="btn btn-primary"
+                                style="height: 38px; display: flex; align-items: center;">
+                                <i data-lucide="refresh-cw"></i> Actualizar
+                            </button>
+                        </div>
+                    </div>
+                </header>
+                <section class="chart-section glassmorphism" style="margin-bottom: 2rem;">
+                    <div style="height: 300px; width: 100%;">
+                        <canvas id="forecastConsolidatedChart"></canvas>
+                    </div>
+                </section>
+                <section class="table-section glassmorphism">
+                    <div class="table-responsive">
+                        <table id="forecastConsolidatedTable">
+                            <thead>
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Ingresos USD</th>
+                                    <th style="color:var(--danger)">Egresos Proveedores USD</th>
+                                    <th style="color:#fb923c">Gastos Farmacia USD</th>
+                                    <th style="color:#c026d3">Gastos Personales Dueños USD</th>
+                                    <th>Flujo Neto Día USD</th>
+                                    <th style="color:#10b981; font-weight:bold;">Saldo Real Caja USD</th>
+                                </tr>
+                            </thead>
+                            <tbody id="forecastConsolidatedBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Cashflow Params View -->
+            <div id="view-cashflow-params" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Parámetros Iniciales de Caja</h1>
+                        <p class="subtitle">Punto de partida y configuraciones base para el cálculo del Saldo Real
+                            Acumulado.</p>
+                    </div>
+                </header>
+
+                <section class="glassmorphism" style="padding: 2rem; max-width: 600px;">
+                    <form id="cashflowParamsForm">
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <label for="paramFechaCero"
+                                style="display: block; font-weight: 500; margin-bottom: 0.5rem; color: var(--text-primary);">1.
+                                Fecha de Arranque (Día Cero)</label>
+                            <input type="date" id="paramFechaCero" class="form-control" style="width: 100%;">
+                            <span class="sub-text" style="display: block; margin-top: 0.25rem;">Todo historial de flujo
+                                consolidado y sumatoria de caja arrancará estrictamente desde este día.</span>
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <label for="paramCajaUsd"
+                                style="display: block; font-weight: 500; margin-bottom: 0.5rem; color: var(--text-primary);">2.
+                                Saldo Físico / Cuentas en Dólares (USD)</label>
+                            <input type="number" step="0.01" id="paramCajaUsd" class="form-control" style="width: 100%;"
+                                placeholder="0.00">
+                        </div>
+
+                        <div style="margin-bottom: 1.5rem;">
+                            <label for="paramCajaBs"
+                                style="display: block; font-weight: 500; margin-bottom: 0.5rem; color: var(--text-primary);">3.
+                                Saldo Cuentas Nacionales (Bs)</label>
+                            <input type="number" step="0.01" id="paramCajaBs" class="form-control" style="width: 100%;"
+                                placeholder="0.00">
+                            <span class="sub-text" style="display: block; margin-top: 0.25rem;">Los Bolívares se
+                                convertirán internamente a USD usando la tasa de cambio del Día Cero.</span>
+                        </div>
+
+                        <div style="margin-bottom: 2rem;">
+                            <label for="paramRetardoDays"
+                                style="display: block; font-weight: 500; margin-bottom: 0.5rem; color: var(--text-primary);">4.
+                                Retardo Bancario / Clearing (Días)</label>
+                            <input type="number" step="1" min="0" id="paramRetardoDays" class="form-control"
+                                style="width: 100%;" value="1">
+                            <span class="sub-text" style="display: block; margin-top: 0.25rem;">Días que tardan los
+                                ingresos de ventas en estar líquidos/disponibles para pagar facturas.</span>
+                        </div>
+
+                        <div
+                            style="padding: 1rem; background: rgba(16, 185, 129, 0.1); border-left: 4px solid #10b981; border-radius: 4px; color: var(--text-primary); display: flex; align-items: center; gap: 0.5rem;">
+                            <i data-lucide="check-circle" style="color: #10b981;"></i> Los cambios en los parámetros se
+                            guardan automáticamente.
+                        </div>
+                    </form>
+                </section>
+            </div>
+
+            <!-- Forecast Events View -->
+            <div id="view-forecast-events" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Variables Exógenas (Eventos)</h1>
+                        <p class="subtitle">Registra promociones o anomalías para mejorar la precisión del modelo
+                            Prophet</p>
+                    </div>
+                </header>
+                <section class="planning-action-bar glassmorphism" style="margin-bottom: 2rem; display: block;">
+                    <div class="planning-controls" style="flex-wrap: wrap;">
+                        <div class="input-group">
+                            <label for="eventFecha">Fecha del Evento:</label>
+                            <input type="date" id="eventFecha" class="form-control">
+                        </div>
+                        <div class="input-group">
+                            <label for="eventTipo">Tipo de Evento:</label>
+                            <select id="eventTipo" class="form-control">
+                                <option value="PROMOCION">Promoción Especial</option>
+                                <option value="ANOMALIA">Anomalía (Ej. Apagón)</option>
+                                <option value="CLIMA">Clima Extremo</option>
+                                <option value="MACRO">Macroeconomía</option>
+                            </select>
+                        </div>
+                        <div class="input-group">
+                            <label for="eventValor">Valor/Intensidad:</label>
+                            <input type="number" id="eventValor" class="form-control" value="1.0" step="0.1">
+                        </div>
+                        <button id="addEventBtn" class="btn btn-primary">
+                            <i data-lucide="plus"></i> Añadir Evento
+                        </button>
+                    </div>
+                </section>
+                <section class="table-section glassmorphism">
+                    <div class="table-responsive">
+                        <table id="forecastEventsTable">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Fecha</th>
+                                    <th>Tipo</th>
+                                    <th>Valor</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="forecastEventsBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- DPO View -->
+            <div id="view-dpo" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Days Payable Outstanding (DPO)</h1>
+                        <p class="subtitle">Promedio de días en pagar a proveedores</p>
+                    </div>
+                </header>
+                <section class="table-section glassmorphism">
+                    <div class="table-responsive">
+                        <table id="dpoTable">
+                            <thead>
+                                <tr>
+                                    <th>Mes Contable</th>
+                                    <th>Días Promedio (DPO)</th>
+                                    <th>Facturas Pagadas</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dpoBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Expense Templates View -->
+            <div id="view-expense-templates" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Plantillas de Gastos</h1>
+                        <p class="subtitle">Configura los gastos recurrentes (Fijos de farmacia o Personales de dueños)
+                        </p>
+                    </div>
+                    <div class="header-right">
+                        <button id="addExpenseTplBtn" class="btn btn-primary" onclick="showExpenseTplModal()">
+                            <i data-lucide="plus"></i> Nueva Plantilla
+                        </button>
+                    </div>
+                </header>
+                <section class="table-section glassmorphism">
+                    <div class="table-responsive">
+                        <table id="expenseTemplatesTable">
+                            <thead>
+                                <tr>
+                                    <th class="sortable" data-sort="descripcion">Descripción <div class="sort-icon">
+                                        </div>
+                                    </th>
+                                    <th class="sortable" data-sort="tipo">Tipo <div class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount sortable" data-sort="monto_usd">Monto Estimado (USD) <div
+                                            class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount sortable" data-sort="dia_mes_estimado">Día de Pago Frecuente <div
+                                            class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="expenseTemplatesBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Expense Batch View -->
+            <div id="view-expense-batch" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Lote Mensual de Gastos</h1>
+                        <p class="subtitle">Genera, verifica y guarda los gastos proyectados para el mes seleccionado
+                        </p>
+                    </div>
+                </header>
+                <div class="stats-grid">
+                    <div class="stat-card glassmorphism" style="grid-column: span 3;">
+                        <div class="table-actions"
+                            style="display: flex; gap: 1rem; align-items: center; padding: 1rem;">
+                            <div class="date-filter" style="display: flex; gap: 0.5rem; align-items: center;">
+                                <label for="batchMes" style="margin: 0; font-weight: 500;">Mes:</label>
+                                <input type="number" id="batchMes" class="form-control" style="width: 80px;" min="1"
+                                    max="12" value="">
+                                <label for="batchAnio" style="margin: 0; font-weight: 500;">Año:</label>
+                                <input type="number" id="batchAnio" class="form-control" style="width: 100px;"
+                                    value="2026">
+                                <button id="generateBatchBtn" class="btn btn-secondary btn-sm"
+                                    onclick="generateExpenseBatch()">
+                                    <i data-lucide="play"></i> Generar Lote
+                                </button>
+                                <button id="addAdhocBtn" class="btn btn-secondary btn-sm" onclick="addAdhocExpense()"
+                                    style="margin-left: 10px;">
+                                    <i data-lucide="plus"></i> Añadir Gasto Variable
+                                </button>
+                                <button id="saveBatchBtn" class="btn btn-primary btn-sm" onclick="saveExpenseBatch()"
+                                    style="display:none; margin-left: 20px;">
+                                    <i data-lucide="save"></i> Guardar Carga Masiva
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <section class="table-section glassmorphism" id="batchSection" style="display: none;">
+                    <h3 style="margin-top:0px; margin-bottom: 15px; color: var(--text-primary)">Gastos Farmacia
+                        (Plantillas)</h3>
+                    <div class="table-responsive" style="margin-bottom: 30px;">
+                        <table id="expenseBatchTableFijos">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;">Sel.</th>
+                                    <th class="sortable" data-sort="descripcion">Descripción <div class="sort-icon">
+                                        </div>
+                                    </th>
+                                    <th class="sortable" data-sort="tipo">Tipo <div class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount sortable" data-sort="monto_usd">Monto Final (USD) <div
+                                            class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount sortable" data-sort="fecha_proyectada">Fecha Pautada <div
+                                            class="sort-icon"></div>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="expenseBatchBodyFijos"></tbody>
+                        </table>
+                    </div>
+
+                    <h3 style="margin-top:0px; margin-bottom: 15px; color: var(--text-primary)">Gastos Variables
+                        (Ad-hoc)</h3>
+                    <div class="table-responsive">
+                        <table id="expenseBatchTableAdhoc">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;">Sel.</th>
+                                    <th class="sortable" data-sort="descripcion">Descripción <div class="sort-icon">
+                                        </div>
+                                    </th>
+                                    <th class="sortable" data-sort="tipo">Tipo <div class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount sortable" data-sort="monto_usd">Monto Final (USD) <div
+                                            class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount sortable" data-sort="fecha_proyectada">Fecha Pautada <div
+                                            class="sort-icon"></div>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="expenseBatchBodyAdhoc"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <h3 style="margin-top:20px; color: var(--text-primary)">Gastos Ya Guardados este Mes</h3>
+                <div style="margin-bottom: 1rem; padding: 0;">
+                    <input type="text" id="expenseSavedBatchSearch" class="form-control"
+                        placeholder="Buscar por descripción..."
+                        style="width: 100%; max-width: 300px; background: rgba(0,0,0,0.2);">
+                </div>
+                <section class="table-section glassmorphism">
+                    <div class="table-responsive">
+                        <table id="expenseSavedBatchTable">
+                            <thead>
+                                <tr>
+                                    <th class="sortable" data-sort="descripcion">Descripción <div class="sort-icon">
+                                        </div>
+                                    </th>
+                                    <th class="sortable" data-sort="tipo">Tipo <div class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount sortable" data-sort="monto_usd">Monto (USD) <div
+                                            class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount sortable" data-sort="fecha_proyectada">Fecha <div
+                                            class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount sortable" data-sort="estado">Estado <div class="sort-icon"></div>
+                                    </th>
+                                    <th class="amount">Eliminar</th>
+                                </tr>
+                            </thead>
+                            <tbody id="expenseSavedBatchBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <!-- SEDEMATRI View -->
+            <div id="view-sedematri" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Impuestos y Catastro (SEDEMATRI)</h1>
+                        <p class="subtitle">Información tributaria - Municipio Maneiro (Pampatar)</p>
+                    </div>
+                </header>
+
+                <div class="stats-grid"
+                    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 2rem;">
+                    <!-- Contact Card -->
+                    <div class="stat-card glassmorphism"
+                        style="flex-direction: column; align-items: flex-start; padding: 2rem; gap: 1.5rem;">
+                        <div style="display: flex; align-items: center; gap: 1rem;">
+                            <div class="stat-icon-wrapper blue" style="width: 3rem; height: 3rem;">
+                                <i data-lucide="map-pin"></i>
+                            </div>
+                            <h3 style="margin: 0; color: var(--text-primary); font-size: 1.1rem;">Ubicación y Contacto
+                            </h3>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 1rem; width: 100%;">
+                            <div class="contact-item">
+                                <span class="sub-text"
+                                    style="color: var(--primary-accent); margin-bottom: 0.2rem;">Dirección
+                                    Principal:</span>
+                                <p style="font-size: 0.95rem;">Calle Joaquín Maneiro, Palacio Municipal (Planta Baja),
+                                    Pampatar.</p>
+                            </div>
+                            <div class="contact-item">
+                                <span class="sub-text" style="color: var(--primary-accent); margin-bottom: 0.2rem;">Sede
+                                    Ingeniería/SEDEMATRI:</span>
+                                <p style="font-size: 0.95rem;">Sector Playa Moreno, detrás del C.C. AB (Edif.
+                                    Administrativo).</p>
+                            </div>
+                            <div class="contact-item"
+                                style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <span class="sub-text"
+                                        style="color: var(--primary-accent); margin-bottom: 0.2rem;">Teléfono:</span>
+                                    <p style="font-size: 0.95rem;">+58 295-2672978</p>
+                                </div>
+                                <a href="tel:+582952672978" class="btn-icon blue"><i data-lucide="phone"></i></a>
+                            </div>
+                            <div class="contact-item">
+                                <span class="sub-text"
+                                    style="color: var(--primary-accent); margin-bottom: 0.2rem;">Horario:</span>
+                                <p style="font-size: 0.95rem;">Lunes a viernes: 8:30 a.m. - 2:30 p.m.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Online Portal & Credentials -->
+                    <div class="stat-card glassmorphism"
+                        style="flex-direction: column; align-items: flex-start; padding: 2rem; gap: 1.5rem;">
+                        <div style="display: flex; align-items: center; gap: 1rem;">
+                            <div class="stat-icon-wrapper green" style="width: 3rem; height: 3rem;">
+                                <i data-lucide="globe"></i>
+                            </div>
+                            <h3 style="margin: 0; color: var(--text-primary); font-size: 1.1rem;">Gestión en Línea</h3>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 1.5rem; width: 100%;">
+                            <div class="portal-link-box"
+                                style="padding: 1rem; background: rgba(255,255,255,0.03); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                                <p style="margin-bottom: 0.5rem; font-size: 0.9rem;">Portal del Contribuyente (SIGAT):
+                                </p>
+                                <a href="https://contribuyentes.sigat.net/" target="_blank" class="btn btn-primary"
+                                    style="width: 100%; justify-content: center;">
+                                    <i data-lucide="external-link"></i> Ir a SIGAT
+                                </a>
+                            </div>
+
+                            <div class="credentials-box"
+                                style="padding: 1rem; border-left: 3px solid var(--warning); background: rgba(245, 158, 11, 0.05); border-radius: 0 var(--radius-md) var(--radius-md) 0;">
+                                <div
+                                    style="display: flex; align-items: center; gap: 0.5rem; color: var(--warning); margin-bottom: 0.5rem;">
+                                    <i data-lucide="key" size="16"></i>
+                                    <span style="font-weight: 600; font-size: 0.85rem;">CREDENCIALES ACCESO</span>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <p style="font-family: monospace; font-size: 1.1rem; color: var(--text-primary);">
+                                        Clave: <span style="letter-spacing: 1px;">seniat2019</span></p>
+                                    <button class="btn-icon" title="Copiar"
+                                        onclick="navigator.clipboard.writeText('seniat2019')"><i data-lucide="copy"
+                                            size="18"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Requirements & Reminders -->
+                    <div class="stat-card glassmorphism"
+                        style="grid-column: 1 / -1; flex-direction: column; align-items: flex-start; padding: 2rem; gap: 1.5rem;">
+                        <div style="display: flex; align-items: center; gap: 1rem;">
+                            <div class="stat-icon-wrapper purple" style="width: 3rem; height: 3rem;">
+                                <i data-lucide="clipboard-list"></i>
+                            </div>
+                            <h3 style="margin: 0; color: var(--text-primary); font-size: 1.1rem;">Trámite de Catastro y
+                                Prórrogas</h3>
+                        </div>
+
+                        <div
+                            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem; width: 100%;">
+                            <div class="info-block">
+                                <h4
+                                    style="color: var(--primary-accent); margin-bottom: 0.75rem; font-size: 0.95rem; text-transform: uppercase;">
+                                    Requisitos Ficha Catastral:</h4>
+                                <ul
+                                    style="font-size: 0.9rem; color: var(--text-secondary); padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.4rem;">
+                                    <li>Copia del documento de propiedad (Registrado).</li>
+                                    <li>Cédula de Identidad / RIF del propietario.</li>
+                                    <li>Solvencia de Inmuebles Urbanos.</li>
+                                    <li>Pago de tasa administrativa en SEDEMATRI.</li>
+                                </ul>
+                            </div>
+                            <div class="info-block"
+                                style="padding: 1rem; background: rgba(59, 130, 246, 0.05); border-radius: var(--radius-md); border: 1px dashed rgba(59, 130, 246, 0.3);">
+                                <h4
+                                    style="color: var(--success); margin-bottom: 0.75rem; font-size: 0.95rem; text-transform: uppercase; display: flex; align-items: center; gap: 0.5rem;">
+                                    <i data-lucide="calendar"></i> Prórroga Pronto Pago 2026:
+                                </h4>
+                                <p style="font-size: 0.9rem; line-height: 1.4;">
+                                    Descuento de hasta el <strong>50%</strong> si se cancela la anualidad completa de
+                                    Inmuebles Urbanos antes del <strong>31 de Marzo</strong>.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Retenciones IVA View -->
+            <div id="view-retenciones" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Retenciones de IVA</h1>
+                        <p class="subtitle">Gestión y emisión de comprobantes de retención</p>
+                    </div>
+                    <div class="header-right" style="display: flex; gap: 1rem; align-items: center;">
+                        <div class="date-filters">
+                            <div class="filter-group">
+                                <label>Desde</label>
+                                <input type="date" id="retencionesDesde" class="form-control">
+                            </div>
+                            <div class="filter-group">
+                                <label>Hasta</label>
+                                <input type="date" id="retencionesHasta" class="form-control">
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="refreshRetencionesBtn">
+                            <i data-lucide="refresh-cw"></i> Buscar
+                        </button>
+                        <button class="btn btn-secondary" id="exportRetencionesTxtBtn">
+                            <i data-lucide="download"></i> TXT SENIAT
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="configRetencionesBtn">
+                            <i data-lucide="settings"></i> Configurar
+                        </button>
+                    </div>
+                </header>
+
+                <div class="card" style="margin-top: 2rem;">
+                    <div class="card-header"><h2>Comprobantes Emitidos</h2></div>
+                    <div class="table-responsive">
+                        <table id="retencionesTable" class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Comprobante</th>
+                                    <th>Factura</th>
+                                    <th>Proveedor</th>
+                                    <th>Fecha Ret.</th>
+                                    <th>Monto Fact.</th>
+                                    <th>Retenido</th>
+                                    <th>Estado</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody id="retencionesTableBody">
+                                <tr><td colspan="8" class="loading-cell"><div class="loader"></div><p>Cargando retenciones...</p></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Edit/Add Expense Template Modal -->
+    <div id="expenseTplModal" class="modal">
+        <div class="modal-content glassmorphism">
+            <h2 id="expenseTplModalTitle">Nueva Plantilla de Gasto</h2>
+            <form id="expenseTplForm" style="margin-top: 1rem;">
+                <input type="hidden" id="tplId">
+                <div class="input-group">
+                    <label for="tplDesc">Descripción del Gasto:</label>
+                    <input type="text" id="tplDesc" class="form-control" required>
+                </div>
+                <div class="input-group">
+                    <label for="tplTipo">Tipo de Gasto:</label>
+                    <select id="tplTipo" class="form-control" required>
+                        <option value="Farmacia">Farmacia</option>
+                        <option value="Personal">Personal</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <label for="tplMonto">Monto (USD):</label>
+                    <input type="number" id="tplMonto" class="form-control" step="0.01" required>
+                </div>
+                <div class="input-group">
+                    <label for="tplDia">Día del Mes Estimado (1-31):</label>
+                    <input type="number" id="tplDia" class="form-control" min="1" max="31" required>
+                </div>
+                <div class="modal-actions"
+                    style="margin-top: 1.5rem; display: flex; justify-content: flex-end; gap: 1rem;">
+                    <button type="button" class="btn btn-secondary" onclick="closeExpenseTplModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Provider Conditions Modal -->
+    <div id="providerCondModal" class="modal">
+        <div class="modal-content glassmorphism" style="max-width: 95vw; width: 95%;">
+            <h2>Condiciones de Indexación de Proveedores</h2>
+            <div class="table-actions"
+                style="margin-top: 1rem; margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center;">
+                <input type="text" id="providerSearchInput" class="form-control" placeholder="Buscar proveedor..."
+                    style="flex: 1;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; white-space: nowrap;">
+                    <input type="checkbox" id="providerActivoCheck" class="form-control"
+                        style="width: 18px; height: 18px; margin: 0;" checked> Sólo Activos
+                </label>
+                <button id="refreshProvidersBtn" class="btn btn-secondary"><i data-lucide="refresh-cw"></i>
+                    Actualizar</button>
+            </div>
+
+            <div class="table-responsive" style="max-height: 50vh; overflow-y: auto;">
+                <table id="providersTable">
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Proveedor</th>
+                            <th>Base Docs</th>
+                            <th>Días NI</th>
+                            <th>Días Vencimiento</th>
+                            <th>Email N/D</th>
+                            <th>PP1 % (Días)</th>
+                            <th>PP2 % (Días)</th>
+                            <th>Acción</th>
+                        </tr>
+                    </thead>
+                    <tbody id="providersTableBody">
+                        <!-- Dynamic rows -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-actions" style="margin-top: 1.5rem; display: flex; justify-content: flex-end;">
+                <button type="button" class="btn btn-secondary" onclick="closeProviderCondModal()">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Register Debit Note Modal -->
+    <div id="registerDebitNoteModal" class="modal" style="z-index: 10005;">
+        <div class="modal-content glassmorphism" style="max-width: 500px;">
+            <h2>Registrar Notas de Débito</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
+                Las facturas seleccionadas se marcarán como "EMITIDA". Ingrese el número de documento de la Nota de
+                Débito. Si varias facturas corresponden a un mismo documento, ingrese el mismo número.
+            </p>
+            <form id="registerDebitNoteForm">
+                <div class="input-group">
+                    <label>Número de Nota de Débito (Referencia):</label>
+                    <input type="text" id="dnInputNumero" class="form-control" required placeholder="Ej: ND-00123">
+                </div>
+                <div style="margin-top: 1.5rem;">
+                    <label
+                        style="font-weight: 600; font-size: 0.95rem; display: block; margin-bottom: 0.5rem;">Retenciones
+                        por Factura (Bs):</label>
+                    <div id="dnSelectedInvoicesList"
+                        style="max-height: 250px; overflow-y: auto; background: var(--bg-card); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.8rem;">
+                        <!-- Injected via JS -->
+                    </div>
+                </div>
+                <div class="modal-actions"
+                    style="margin-top: 1.5rem; display: flex; justify-content: flex-end; gap: 1rem;">
+                    <button type="button" class="btn btn-secondary"
+                        onclick="closeRegisterDebitNoteModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Registrar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Single Provider Modal -->
+    <div id="editProviderCondModal" class="modal" style="z-index: 10010;">
+        <div class="modal-content glassmorphism" style="max-width: 500px;">
+            <h2 id="editProvTitle">Editar Proveedor</h2>
+            <form id="editProvForm" style="margin-top: 1rem;">
+                <input type="hidden" id="editProvCod">
+                <div class="input-group">
+                    <label>Correo Electrónico para N/D:</label>
+                    <input type="text" id="editProvEmail" class="form-control" placeholder="prov1@ejemplo.com; prov2@ejemplo.com">
+                </div>
+                <div class="input-group">
+                    <label>Base inicio de condiciones (Factura vs Llegada Mercancía):</label>
+                    <select id="editProvBase" class="form-control">
+                        <option value="ENTREGA">Recepción Mercancía</option>
+                        <option value="EMISION">Emisión (Factura)</option>
+                    </select>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="input-group">
+                        <label>Días No Indexación:</label>
+                        <input type="number" id="editProvDiasNI" class="form-control" min="0" required>
+                    </div>
+                    <div class="input-group">
+                        <label>Días Vencimiento (Saint):</label>
+                        <input type="number" id="editProvDiasV" class="form-control" min="0" required>
+                    </div>
+                </div>
+
+                <p
+                    style="margin-top: 1rem; margin-bottom: 0.5rem; font-weight: bold; font-size: 0.9rem; color: var(--primary-accent);">
+                    Pronto Pagos</p>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="input-group">
+                        <label>PP1 - (%) Dcto:</label>
+                        <input type="number" id="editProvPP1Pct" class="form-control" step="0.01" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>PP1 - Días Vigencia:</label>
+                        <input type="number" id="editProvPP1Dias" class="form-control" min="0">
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.5rem;">
+                    <div class="input-group">
+                        <label>PP2 - (%) Dcto:</label>
+                        <input type="number" id="editProvPP2Pct" class="form-control" step="0.01" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>PP2 - Días Vigencia:</label>
+                        <input type="number" id="editProvPP2Dias" class="form-control" min="0">
+                    </div>
+                </div>
+
+                <div class="modal-actions"
+                    style="margin-top: 1.5rem; display: flex; justify-content: flex-end; gap: 1rem;">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditProviderModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Abonos / Pagos Modal -->
+    <div id="abonosModal" class="modal" style="z-index: 1002;">
+        <div class="modal-content glassmorphism" style="max-width: 1000px; width: 95%;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem;">
+                <div>
+                    <h2 id="abonoModalTitle" style="margin-bottom: 0.2rem;">Gestión de Pagos</h2>
+                    <p id="abonoModalSubtitle" style="color: var(--text-secondary); font-size: 0.95rem;">Factura: - |
+                        Proveedor: -</p>
+                </div>
+                <button class="btn-icon" onclick="closeAbonosModal()"><i data-lucide="x"></i></button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                <!-- Left Column: Info & Status -->
+                <div
+                    style="background: rgba(255,255,255,0.02); padding: 1.5rem; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                    <h3
+                        style="margin-top: 0; color: var(--primary-accent); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <i data-lucide="info" size="18"></i> Estado de la Factura
+                    </h3>
+
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span style="color: var(--text-secondary);">Monto Original:</span>
+                        <strong id="abMontoOrigBs">Bs 0.00</strong>
+                    </div>
+                    <div
+                        style="display: flex; justify-content: space-between; margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 1rem;">
+                        <span style="color: var(--text-secondary);">Equivalente USD (Emisión):</span>
+                        <strong id="abMontoOrigUsd" style="color: var(--success);">$ 0.00</strong>
+                    </div>
+
+                    <div
+                        style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.9rem; margin-bottom: 1.5rem;">
+                        <div style="color: var(--text-secondary);">Emisión (o Entrega):</div>
+                        <div id="abFechaBase" style="text-align: right; font-weight: 500;">-</div>
+
+                        <div style="color: var(--warning);">Límite No Indexación:</div>
+                        <div id="abFechaNI" style="text-align: right; font-weight: 500; color: var(--warning);">-</div>
+
+                        <div style="color: var(--primary-accent);">Pronto Pago 1:</div>
+                        <div id="abFechaPP1" style="text-align: right; font-weight: 500;">-</div>
+
+                        <div style="color: var(--danger);">Vencimiento:</div>
+                        <div id="abFechaV" style="text-align: right; font-weight: 500; color: var(--danger);">-</div>
+                    </div>
+
+                    <div
+                        style="background: rgba(16, 185, 129, 0.1); border: 1px solid var(--success); padding: 1rem; border-radius: var(--radius-sm); text-align: center;">
+                        <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;">Saldo Restante en USD</p>
+                        <h2 id="abSaldoUsd" style="margin: 0.5rem 0 0 0; color: var(--success); font-size: 2rem;">$ 0.00
+                        </h2>
+                    </div>
+
+                    <div
+                        style="margin-top: 1.5rem; background: rgba(255, 255, 255, 0.03); padding: 1rem; border-radius: var(--radius-sm); border: 1px dashed var(--border-color);">
+                        <h4
+                            style="margin-top: 0; color: var(--text-secondary); display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem;">
+                            <i data-lucide="history" size="16"></i> Histórico Último Pago (Saint)
+                        </h4>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.85rem;">
+                            <span style="color: var(--text-secondary);">Número UP:</span>
+                            <strong id="abNumeroUP" style="text-align: right;">-</strong>
+
+                            <span style="color: var(--text-secondary);">Fecha UP:</span>
+                            <strong id="abFechaUP" style="text-align: right;">-</strong>
+
+                            <span style="color: var(--text-secondary);">Monto UP:</span>
+                            <strong id="abMontoUP" style="text-align: right;">-</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: Payment Form -->
+                <div style="display: flex; flex-direction: column; gap: 1rem;">
+                    <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;"><i data-lucide="plus-circle"
+                            size="18"></i> Registrar Abono</h3>
+
+                    <form id="abonoForm"
+                        style="display: flex; flex-direction: column; gap: 1rem; background: rgba(0,0,0,0.2); padding: 1.5rem; border-radius: var(--radius-md);">
+                        <input type="hidden" id="abCodProv">
+                        <input type="hidden" id="abNumeroD">
+
+                        <div class="input-group">
+                            <label>Fecha del Pago:</label>
+                            <input type="date" id="abFechaPago" class="form-control" required>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem;">
+                            <div class="input-group">
+                                <label>Monto Pagado (Bs):</label>
+                                <input type="number" id="abMontoBs" class="form-control" step="0.01" min="0.01"
+                                    required>
+                            </div>
+                            <div class="input-group">
+                                <label>Tasa BCV:</label>
+                                <div style="position: relative;">
+                                    <input type="number" id="abTasa" class="form-control" step="0.0001" readonly
+                                        style="background: var(--bg-card);">
+                                    <div id="abTasaLoader" class="loader"
+                                        style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; display: none;">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <label>Equivalente USD Amortizado:</label>
+                            <input type="number" id="abMontoUsd" class="form-control" step="0.01" readonly
+                                style="color: var(--success); font-weight: bold; background: rgba(16, 185, 129, 0.05);">
+                        </div>
+
+                        <label
+                            style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-top: 0.5rem;">
+                            <input type="checkbox" id="abAplicaIndex">
+                            <span>¿Aplicar Indexación? (Usar la tasa del día en lugar de la original)</span>
+                        </label>
+
+                        <div class="input-group" style="margin-top: 0.5rem;">
+                            <label>Referencia / Notas:</label>
+                            <input type="text" id="abReferencia" class="form-control"
+                                placeholder="Ej. Transf Banesco 1234...">
+                        </div>
+
+                        <div class="input-group" style="margin-top: 0.5rem;">
+                            <label>Soporte de Pago (Opcional):</label>
+                            <input type="file" id="abComprobante" class="form-control" accept="image/jpeg, application/pdf">
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 1rem; margin-top: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="checkbox" id="abNotificarCorreo">
+                                <span>Enviar soporte por correo al proveedor</span>
+                            </label>
+                            <button type="button" id="btnResendEmail" class="btn btn-secondary" disabled
+                                style="padding: 0.3rem 0.8rem; font-size: 0.85rem; display: flex; align-items: center; gap: 0.4rem;">
+                                <i data-lucide="send"></i> Re-enviar correo
+                            </button>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary"
+                            style="margin-top: 0.5rem; justify-content: center; height: 3rem;">
+                            <i data-lucide="check-circle"></i> Procesar Pago
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Bottom: History -->
+            <div style="margin-top: 2rem;">
+                <h3 style="margin-bottom: 1rem;"><i data-lucide="history" size="18"></i> Historial de Abonos</h3>
+                <div class="table-responsive">
+                    <table style="width: 100%;">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Monto Bs</th>
+                                <th>Tasa C.</th>
+                                <th>Indexado</th>
+                                <th>Amortizado USD</th>
+                                <th>Referencia</th>
+                            </tr>
+                        </thead>
+                        <tbody id="abonosHistoryBody">
+                            <tr>
+                                <td colspan="6" style="text-align: center;">No hay abonos registrados.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pago Múltiple Modal -->
+    <div id="pagoMultipleModal" class="modal" style="z-index: 10030;">
+        <div class="modal-content glassmorphism" style="max-width: 1100px; width: 95%;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
+                <h2 style="margin:0;"><i data-lucide="banknote" style="width:20px;height:20px;vertical-align:middle;"></i> Pago Múltiple de Facturas</h2>
+                <button class="btn-icon" onclick="closePagoMultipleModal()"><i data-lucide="x"></i></button>
+            </div>
+
+            <p id="pagoMultiSubtitle" style="color:var(--text-secondary);margin-bottom:1rem;">Proveedor: -</p>
+
+            <form id="pagoMultipleForm" style="display:flex;flex-direction:column;gap:1rem;">
+                <!-- Invoice table with per-row controls -->
+                <div style="max-height:350px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;">
+                    <table class="data-table" style="margin:0;font-size:0.85rem;">
+                        <thead>
+                            <tr>
+                                <th>Factura</th>
+                                <th>Saldo USD</th>
+                                <th>Fecha Pago</th>
+                                <th>Indexado</th>
+                                <th>Tasa</th>
+                                <th>Monto Bs</th>
+                                <th>Equiv. USD</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pmInvoicesTable"></tbody>
+                        <tfoot>
+                            <tr style="background:var(--bg-tertiary);font-weight:bold;">
+                                <td>TOTALES:</td>
+                                <td id="pmTotalSaldoUsd" class="amount" style="color:var(--success);">0.00</td>
+                                <td colspan="3"></td>
+                                <td id="pmTotalMontoBs" class="amount">0.00</td>
+                                <td id="pmTotalMontoUsd" class="amount" style="color:var(--success);">0.00</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <!-- Shared fields -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                    <div class="input-group">
+                        <label>Referencia / N° Transferencia:</label>
+                        <input type="text" id="pmReferencia" class="form-control" placeholder="Ej. Transf Banesco 1234...">
+                    </div>
+                    <div class="input-group">
+                        <label>Soporte de Pago (Opcional):</label>
+                        <input type="file" id="pmComprobante" class="form-control" accept="image/jpeg,application/pdf">
+                    </div>
+                </div>
+
+                <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                    <input type="checkbox" id="pmNotificarCorreo">
+                    <span>Enviar soporte por correo al proveedor</span>
+                </label>
+
+                <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:0.5rem;">
+                    <button type="button" class="btn btn-secondary" onclick="closePagoMultipleModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" style="height:3rem;"><i data-lucide="check-circle"></i> Procesar Pagos</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Retenciones Config Modal -->
+    <div id="retConfigModal" class="modal" style="z-index: 10020;">
+        <div class="modal-content glassmorphism" style="max-width: 500px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
+                <h2 style="margin:0;"><i data-lucide="settings" style="width:20px;height:20px;vertical-align:middle;"></i> Configuración Retenciones</h2>
+                <button class="btn-icon" onclick="closeRetConfigModal()"><i data-lucide="x"></i></button>
+            </div>
+            <form id="retConfigForm" style="display:flex;flex-direction:column;gap:1rem;">
+                <div class="input-group">
+                    <label>RIF Agente (sin guiones)</label>
+                    <input type="text" id="cfgRifAgente" class="form-control" required>
+                </div>
+                <div class="input-group">
+                    <label>Nombre / Razón Social</label>
+                    <input type="text" id="cfgNombreAgente" class="form-control" required>
+                </div>
+                <div class="input-group">
+                    <label>Dirección Fiscal</label>
+                    <input type="text" id="cfgDireccionAgente" class="form-control">
+                </div>
+                <div class="input-group">
+                    <label>Valor UT (Bs)</label>
+                    <input type="number" id="cfgValorUT" class="form-control" step="0.01" min="0" required>
+                </div>
+                <div class="input-group">
+                    <label>Último Secuencial</label>
+                    <input type="number" id="cfgProximoSecuencial" class="form-control" min="0" value="0">
+                </div>
+                <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:1rem;">
+                    <button type="button" class="btn btn-secondary" onclick="closeRetConfigModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Generar Retención Modal (Multi-Factura) -->
+    <div id="generarRetencionModal" class="modal" style="z-index: 10020;">
+        <div class="modal-content glassmorphism" style="max-width: 800px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
+                <h2 style="margin:0;"><i data-lucide="receipt" style="width:20px;height:20px;vertical-align:middle;"></i> Generar Comprobante de Retención</h2>
+                <button class="btn-icon" onclick="closeGenerarRetencionModal()"><i data-lucide="x"></i></button>
+            </div>
+
+            <div id="retenWarningUT" style="display:none;margin-bottom:1rem;padding:0.8rem;background:rgba(234,179,8,0.1);border-left:4px solid #eab308;border-radius:4px;font-size:0.85rem;color:#eab308;"></div>
+
+            <form id="generarRetencionForm" style="display:flex;flex-direction:column;gap:1rem;">
+                <!-- Shared fields -->
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+                    <div class="input-group">
+                        <label>Proveedor (RIF/Cód)</label>
+                        <input type="text" id="genRetCodProv" class="form-control" readonly>
+                    </div>
+                    <div class="input-group">
+                        <label>Fecha Retención</label>
+                        <input type="date" id="genRetFechaEmision" class="form-control" required>
+                    </div>
+                    <div class="input-group">
+                        <label>% Retención (Gaceta)</label>
+                        <select id="genRetPctGaceta" class="form-control">
+                            <option value="75">75%</option>
+                            <option value="100">100%</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Invoice table -->
+                <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;">
+                    <table class="data-table" style="margin:0;">
+                        <thead>
+                            <tr>
+                                <th>Factura</th>
+                                <th>Nro Control</th>
+                                <th>Monto Total</th>
+                                <th>Base Imponible</th>
+                                <th>Alícuota %</th>
+                                <th>IVA Causado</th>
+                                <th>Monto Retenido</th>
+                            </tr>
+                        </thead>
+                        <tbody id="genRetInvoicesTable"></tbody>
+                        <tfoot>
+                            <tr style="background:var(--bg-tertiary);font-weight:bold;">
+                                <td colspan="2" style="text-align:right;">TOTALES:</td>
+                                <td id="genRetTotalMonto" class="amount">0.00</td>
+                                <td id="genRetTotalBase" class="amount">0.00</td>
+                                <td></td>
+                                <td id="genRetTotalIVA" class="amount">0.00</td>
+                                <td id="genRetTotalRetenido" class="amount" style="color:var(--warning);font-weight:bold;font-size:1.1rem;">0.00</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:0.5rem;">
+                    <button type="button" class="btn btn-secondary" onclick="closeGenerarRetencionModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i data-lucide="check"></i> Generar Comprobante</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Invoice Edit Modal (lateral panel style) -->
+    <div id="invoiceEditModal" class="modal" style="z-index: 10020;">
+        <div class="modal-content glassmorphism" style="max-width: 520px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
+                <h2 style="margin:0;"><i data-lucide="edit-3" style="width:20px;height:20px;vertical-align:middle;"></i> Editar Factura</h2>
+                <button class="btn-icon" onclick="closeInvoiceEditModal()"><i data-lucide="x"></i></button>
+            </div>
+            <p id="invoiceEditSubtitle" style="color:var(--text-secondary);margin-bottom:1rem;font-size:0.9rem;">Factura: -</p>
+            <form id="invoiceEditForm" style="display:flex;flex-direction:column;gap:1rem;">
+                <input type="hidden" id="ieNumeroD">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+                    <div class="input-group">
+                        <label>Fecha Emisión (FechaE):</label>
+                        <input type="date" id="ieFechaE" class="form-control">
+                    </div>
+                    <div class="input-group">
+                        <label>Fecha Ingreso (FechaI):</label>
+                        <input type="date" id="ieFechaI" class="form-control">
+                    </div>
+                    <div class="input-group">
+                        <label>Fecha Vencimiento (FechaV):</label>
+                        <input type="date" id="ieFechaV" class="form-control">
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+                    <div class="input-group">
+                        <label>Saldo (Bs):</label>
+                        <input type="number" id="ieSaldoAct" class="form-control" step="0.01" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>Monto Factura (USD):</label>
+                        <input type="number" id="ieMontoFacturaUSD" class="form-control" step="0.01" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>Monto Factura (Bs):</label>
+                        <input type="number" id="ieMontoFacturaBS" class="form-control" step="0.01" min="0">
+                    </div>
+                </div>
+                <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:0.5rem;">
+                    <button type="button" class="btn btn-secondary" onclick="closeInvoiceEditModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar Cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="script.js?v=3"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+
+</html>
