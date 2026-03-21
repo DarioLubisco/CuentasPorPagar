@@ -90,8 +90,49 @@ def create_tables():
         END
         """)
         
+        # 4. Migrations (idempotent)
+        print("Running migrations...")
+        
+        # 4a. Add new columns to Retenciones_IVA
+        cursor.execute("""
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='Retenciones_IVA' AND COLUMN_NAME='NroNotaDebito')
+            ALTER TABLE [Procurement].[Retenciones_IVA] ADD [NroNotaDebito] VARCHAR(20) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='Retenciones_IVA' AND COLUMN_NAME='NroNotaCredito')
+            ALTER TABLE [Procurement].[Retenciones_IVA] ADD [NroNotaCredito] VARCHAR(20) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='Retenciones_IVA' AND COLUMN_NAME='FacturaAfectada')
+            ALTER TABLE [Procurement].[Retenciones_IVA] ADD [FacturaAfectada] VARCHAR(50) NULL;
+        """)
+        
+        # 4b. Add TipoAbono column to CxP_Abonos
+        cursor.execute("""
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='CxP_Abonos' AND COLUMN_NAME='TipoAbono')
+            ALTER TABLE [dbo].[CxP_Abonos] ADD [TipoAbono] VARCHAR(20) NOT NULL CONSTRAINT DF_CxP_TipoAbono DEFAULT 'PAGO';
+        """)
+        
+        # 5. CreditNotesTracking
+        print("Creating table CreditNotesTracking...")
+        cursor.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[Procurement].[CreditNotesTracking]') AND type in (N'U'))
+        BEGIN
+            CREATE TABLE [Procurement].[CreditNotesTracking] (
+                [Id] INT IDENTITY(1,1) PRIMARY KEY,
+                [CodProv] VARCHAR(50) NOT NULL,
+                [NumeroD] VARCHAR(50) NOT NULL,
+                [NotaCreditoID] VARCHAR(50),
+                [Motivo] VARCHAR(20) NOT NULL,
+                [MontoBs] DECIMAL(18,2) NOT NULL,
+                [TasaCambio] DECIMAL(18,4),
+                [MontoUsd] DECIMAL(18,2),
+                [Estatus] VARCHAR(30) DEFAULT 'PENDIENTE',
+                [FechaSolicitud] DATETIME DEFAULT GETDATE(),
+                [FechaEmision] DATETIME,
+                [Observacion] VARCHAR(200)
+            );
+        END
+        """)
+        
         conn.commit()
-        print("Tables created successfully!")
+        print("Tables created and migrations applied successfully!")
         
     except Exception as e:
         print(f"Error: {e}")

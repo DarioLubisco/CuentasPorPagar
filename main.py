@@ -247,6 +247,7 @@ async def get_cuentas_por_pagar(search: str = Query("", description="Search term
               SACOMP.CodSucu AS CodSucu_SACOMP,
               SACOMP.TipoCom,
               SACOMP.Notas10,
+              SACOMP.TGravable,
               SAPAGCXP.NumeroD AS NumeroD_SAPAGCXP,
               dt_emision.dolarbcv AS TasaEmision,
               dt_actual.dolarbcv AS TasaActual,
@@ -890,14 +891,14 @@ async def editar_factura(numeroD: str, cod_prov: str = Query(default=''), payloa
     Fields: FechaE, FechaI, FechaV, SaldoAct (maps to SAACXP.Saldo + SAPROV.Saldo delta), MontoFacturaBS, MontoFacturaUSD, Notas10.
     cod_prov query param is required to correctly identify the SACOMP row.
     """
-    print(f"\n[PATCH-DEV] numeroD={numeroD} cod_prov={cod_prov} payload={payload}")
+    print(f"\n[PATCH] numeroD={numeroD} cod_prov={cod_prov} payload={payload}")
     # Write to a persistent debug file with absolute path
-    log_file = r"C:\source\cuentasporpagarDev\patch_debug.log"
+    log_file = r"C:\source\CuentasPorPagar\patch_debug.log"
     try:
         with open(log_file, "a", encoding="utf-8") as f:
             import datetime
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"[{timestamp}] DEV numeroD={numeroD} cod_prov={cod_prov} payload={payload}\n")
+            f.write(f"[{timestamp}] numeroD={numeroD} cod_prov={cod_prov} payload={payload}\n")
     except Exception as e:
         print(f"Error writing to log: {e}")
 
@@ -985,26 +986,34 @@ async def editar_factura(numeroD: str, cod_prov: str = Query(default=''), payloa
             elif notas10_val == "0" or notas10_val == "":
                 # '0' or 'Sin cambio' means clear the field
                 comp_fields.append("Notas10 = NULL")
-        
+
+        if "TGravable" in payload and payload["TGravable"] is not None:
+            comp_fields.append("TGravable = ?")
+            comp_params.append(float(payload["TGravable"]))
+
         if comp_fields:
             set_clause = ", ".join(comp_fields)
+            # Filter by both CodProv and NumeroD to match the JOIN used in SELECT
+            logging.info(f"[PATCH SACOMP] numeroD={numeroD} cod_prov={cod_prov!r} fields={comp_fields} params={comp_params}")
             if cod_prov:
                 comp_params.append(cod_prov)
                 comp_params.append(numeroD)
+                logging.info(f"[PATCH SACOMP] SQL: UPDATE SACOMP SET {set_clause} WHERE CodProv=? AND NumeroD=?  params={tuple(comp_params)}")
                 cursor.execute(
                     f"UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET {set_clause} WHERE CodProv = ? AND NumeroD = ?",
                     tuple(comp_params)
                 )
+                logging.info(f"[PATCH SACOMP] rowcount={cursor.rowcount}")
             else:
                 comp_params.append(numeroD) # type: ignore
                 cursor.execute(
                     f"UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET {set_clause} WHERE NumeroD = ?",
                     tuple(comp_params)
                 )
-
-            print(f"[PATCH-DEV SACOMP] Affected Rows: {cursor.rowcount}")
+            
+            print(f"[PATCH SACOMP] Affected Rows: {cursor.rowcount}")
             with open(log_file, "a", encoding="utf-8") as f:
-                f.write(f"[PATCH-DEV SACOMP] Affected Rows: {cursor.rowcount}\n")
+                f.write(f"[PATCH SACOMP] Affected Rows: {cursor.rowcount}\n")
 
         conn.commit()
         return {"message": f"Factura {numeroD} actualizada y tablas Saint sincronizadas correctamente."}
@@ -1033,6 +1042,7 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
                 cxp.NumeroD, cxp.CodProv, cxp.Monto, cxp.Saldo, 
                 cxp.FechaE, cxp.FechaV AS FechaVSaint,
                 comp.FechaI, comp.Notas10,
+                comp.TGravable, cxp.MtoTax,
                 ISNULL(cond.DiasNoIndexacion, 0) AS DiasNoIndexacion,
                 ISNULL(cond.BaseDiasCredito, 'EMISION') AS BaseDiasCredito,
                 ISNULL(cond.DiasVencimiento, prov.diascred) AS DiasVencimiento,
@@ -1121,7 +1131,7 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
 
         # Fetch Abonos History
         history_query = """
-            SELECT FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia
+            SELECT FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, TipoAbono
             FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos
             WHERE CodProv = ? AND NumeroD = ?
             ORDER BY FechaAbono ASC
@@ -2144,12 +2154,25 @@ async def crear_retencion(payload: dict = Body(...)):
             ))
             new_id = cursor.fetchone()[0]
             inserted_ids.append(new_id)
+            
+            # Auto-register as abono in CxP_Abonos with TipoAbono='RETENCION_IVA'
+            monto_retenido = float(f.get("MontoRetenido", 0))
+            if monto_retenido > 0:
+                cursor.execute("""
+                    INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
+                    (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, TipoAbono)
+                    VALUES (?, ?, ?, ?, 0, 0, 0, ?, 'RETENCION_IVA')
+                """, (
+                    f["NumeroD"], f["CodProv"], fecha_retencion,
+                    monto_retenido,
+                    f"Retención IVA Comp. {nro_comprobante}"
+                ))
         
         # 3. Update sequential
         cursor.execute("UPDATE EnterpriseAdmin_AMC.Procurement.Retenciones_Config SET UltimoSecuencial = ? WHERE Id = 1", (new_seq,))
         
         conn.commit()
-        logging.info(f"Retención {nro_comprobante} creada con {len(facturas)} factura(s)")
+        logging.info(f"Retención {nro_comprobante} creada con {len(facturas)} factura(s) + abonos automáticos")
         return {"message": "Retención creada exitosamente", "NumeroComprobante": nro_comprobante, "Ids": inserted_ids}
     except Exception as e:
         if 'conn' in locals(): conn.rollback()
@@ -2163,7 +2186,7 @@ async def anular_retencion(id_ret: int):
     try:
         conn = database.get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT Estado FROM EnterpriseAdmin_AMC.Procurement.Retenciones_IVA WHERE Id = ?", (id_ret,))
+        cursor.execute("SELECT Estado, NumeroComprobante, NumeroD, CodProv FROM EnterpriseAdmin_AMC.Procurement.Retenciones_IVA WHERE Id = ?", (id_ret,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Retención no encontrada")
@@ -2171,8 +2194,17 @@ async def anular_retencion(id_ret: int):
             raise HTTPException(status_code=400, detail="No se puede anular una retención ENTERADA (declarada ante SENIAT)")
             
         cursor.execute("UPDATE EnterpriseAdmin_AMC.Procurement.Retenciones_IVA SET Estado = 'ANULADO' WHERE Id = ?", (id_ret,))
+        
+        # Delete the auto-registered abono for this retención
+        nro_comprobante = row[1]
+        cursor.execute("""
+            DELETE FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos 
+            WHERE NumeroD = ? AND CodProv = ? AND TipoAbono = 'RETENCION_IVA' 
+            AND Referencia LIKE ?
+        """, (row[2], row[3], f"%{nro_comprobante}%"))
+        
         conn.commit()
-        return {"message": "Retención anulada"}
+        return {"message": "Retención anulada y abono correspondiente eliminado"}
     except HTTPException:
         raise
     except Exception as e:
@@ -2641,6 +2673,158 @@ async def export_retenciones_txt(desde: Optional[str] = None, hasta: Optional[st
         raise
     except Exception as e:
         if 'conn' in locals(): conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+# ═══════════════════════════════════════════════════════════
+# NOTAS DE CRÉDITO MODULE
+# ═══════════════════════════════════════════════════════════
+
+@app.get("/api/credit-notes")
+async def get_credit_notes(cod_prov: Optional[str] = None, estatus: Optional[str] = None):
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        query = """
+            SELECT cn.*, prov.Descrip AS ProveedorNombre
+            FROM EnterpriseAdmin_AMC.Procurement.CreditNotesTracking cn
+            LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV prov ON cn.CodProv = prov.CodProv
+            WHERE 1=1
+        """
+        params = []
+        if cod_prov:
+            query += " AND cn.CodProv = ?"
+            params.append(cod_prov)
+        if estatus:
+            query += " AND cn.Estatus = ?"
+            params.append(estatus)
+        query += " ORDER BY cn.FechaSolicitud DESC"
+        cursor.execute(query, tuple(params))
+        columns = [col[0] for col in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        for r in results:
+            for k, v in r.items():
+                if hasattr(v, 'quantize'):
+                    r[k] = float(v) if v is not None else 0.0
+                elif hasattr(v, 'strftime'):
+                    r[k] = v.strftime('%Y-%m-%d %H:%M') if v else None
+        return {"data": results}
+    except Exception as e:
+        logging.error(f"Error fetching credit notes: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.get("/api/credit-notes/pending/{cod_prov}")
+async def get_pending_credit_notes(cod_prov: str):
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT cn.*, prov.Descrip AS ProveedorNombre
+            FROM EnterpriseAdmin_AMC.Procurement.CreditNotesTracking cn
+            LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV prov ON cn.CodProv = prov.CodProv
+            WHERE cn.CodProv = ? AND cn.Estatus = 'PENDIENTE'
+            ORDER BY cn.FechaSolicitud DESC
+        """, (cod_prov,))
+        columns = [col[0] for col in cursor.description]
+        results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        for r in results:
+            for k, v in r.items():
+                if hasattr(v, 'quantize'):
+                    r[k] = float(v) if v is not None else 0.0
+                elif hasattr(v, 'strftime'):
+                    r[k] = v.strftime('%Y-%m-%d %H:%M') if v else None
+        return {"data": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.post("/api/credit-notes")
+async def create_credit_note(payload: dict = Body(...)):
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO EnterpriseAdmin_AMC.Procurement.CreditNotesTracking 
+            (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Observacion)
+            OUTPUT INSERTED.Id
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            payload["CodProv"], payload["NumeroD"], 
+            payload.get("Motivo", "PAGO_EXCESO"),
+            float(payload["MontoBs"]),
+            float(payload.get("TasaCambio", 0)),
+            float(payload.get("MontoUsd", 0)),
+            payload.get("Observacion", "")
+        ))
+        new_id = cursor.fetchone()[0]
+        conn.commit()
+        logging.info(f"Nota de Crédito #{new_id} creada para {payload['CodProv']} factura {payload['NumeroD']}")
+        return {"message": "Nota de Crédito creada", "Id": new_id}
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        logging.error(f"Error creating credit note: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.patch("/api/credit-notes/{id_nc}")
+async def update_credit_note(id_nc: int, payload: dict = Body(...)):
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT Estatus, CodProv, NumeroD, MontoBs, NotaCreditoID FROM EnterpriseAdmin_AMC.Procurement.CreditNotesTracking WHERE Id = ?", (id_nc,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Nota de Crédito no encontrada")
+        
+        new_status = payload.get("Estatus", row[0])
+        
+        if new_status == "APLICADA" and row[0] != "APLICADA":
+            # Apply: update status and register as abono
+            nota_credito_id = payload.get("NotaCreditoID", row[4] or "")
+            cursor.execute("""
+                UPDATE EnterpriseAdmin_AMC.Procurement.CreditNotesTracking 
+                SET Estatus = 'APLICADA', FechaEmision = GETDATE(), NotaCreditoID = ?
+                WHERE Id = ?
+            """, (nota_credito_id, id_nc))
+            
+            # Auto-register as abono
+            cursor.execute("""
+                INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
+                (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, TipoAbono)
+                VALUES (?, ?, GETDATE(), ?, 0, 0, 0, ?, 'NOTA_CREDITO')
+            """, (row[2], row[1], float(row[3]), f"Nota Crédito #{nota_credito_id or id_nc}"))
+            
+        elif new_status == "ANULADA" and row[0] != "ANULADA":
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.Procurement.CreditNotesTracking SET Estatus = 'ANULADA' WHERE Id = ?", (id_nc,))
+            
+            # Remove the auto-registered abono if it was applied
+            if row[0] == "APLICADA":
+                cursor.execute("""
+                    DELETE FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos 
+                    WHERE NumeroD = ? AND CodProv = ? AND TipoAbono = 'NOTA_CREDITO' 
+                    AND Referencia LIKE ?
+                """, (row[2], row[1], f"%{row[4] or id_nc}%"))
+        else:
+            # General update (e.g., editing NotaCreditoID or Observacion)
+            cursor.execute("""
+                UPDATE EnterpriseAdmin_AMC.Procurement.CreditNotesTracking 
+                SET NotaCreditoID = COALESCE(?, NotaCreditoID), Observacion = COALESCE(?, Observacion)
+                WHERE Id = ?
+            """, (payload.get("NotaCreditoID"), payload.get("Observacion"), id_nc))
+        
+        conn.commit()
+        return {"message": f"Nota de Crédito actualizada a {new_status}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        logging.error(f"Error updating credit note: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if 'conn' in locals(): conn.close()
