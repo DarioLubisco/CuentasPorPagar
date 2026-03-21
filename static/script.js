@@ -295,8 +295,8 @@ document.addEventListener('DOMContentLoaded', () => {
             window.currentData.sort((a, b) => {
                 const dateA = a.FechaE || '';
                 const dateB = b.FechaE || '';
-                if (dateA < dateB) return -1;
-                if (dateA > dateB) return 1;
+                if (dateA < dateB) return 1;
+                if (dateA > dateB) return -1;
                 return 0;
             });
 
