@@ -1361,6 +1361,14 @@
                         <span style="color: var(--text-secondary);">Monto Original:</span>
                         <strong id="abMontoOrigBs">Bs 0.00</strong>
                     </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 0.5rem; font-size: 0.85rem; margin-bottom: 0.5rem; padding: 0.5rem; background: rgba(99,102,241,0.06); border-radius: var(--radius-sm);">
+                        <span style="color: var(--text-secondary);">Base Imponible:</span>
+                        <strong id="abBaseImponible" style="text-align: right;">Bs 0.00</strong>
+                        <span style="color: var(--text-secondary);">IVA:</span>
+                        <strong id="abIVA" style="text-align: right; color: var(--warning);">Bs 0.00</strong>
+                        <span style="color: var(--text-secondary);">Exento:</span>
+                        <strong id="abExento" style="text-align: right;">Bs 0.00</strong>
+                    </div>
                     <div
                         style="display: flex; justify-content: space-between; margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 1rem;">
                         <span style="color: var(--text-secondary);">Equivalente USD (Emisión):</span>
@@ -1496,6 +1504,7 @@
                         <thead>
                             <tr>
                                 <th>Fecha</th>
+                                <th>Tipo</th>
                                 <th>Monto Bs</th>
                                 <th>Tasa C.</th>
                                 <th>Indexado</th>
@@ -1505,7 +1514,7 @@
                         </thead>
                         <tbody id="abonosHistoryBody">
                             <tr>
-                                <td colspan="6" style="text-align: center;">No hay abonos registrados.</td>
+                                <td colspan="7" style="text-align: center;">No hay abonos registrados.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -1704,7 +1713,7 @@
                         <input type="date" id="ieFechaV" class="form-control">
                     </div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1rem;">
                     <div class="input-group">
                         <label>Saldo (Bs):</label>
                         <input type="number" id="ieSaldoAct" class="form-control" step="0.01" min="0">
@@ -1712,6 +1721,10 @@
                     <div class="input-group">
                         <label>Monto Factura (Bs):</label>
                         <input type="number" id="ieMontoFacturaBS" class="form-control" step="0.01" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>Base Imponible (Bs):</label>
+                        <input type="number" id="ieTGravable" class="form-control" step="0.01" min="0">
                     </div>
                 </div>
                 <div class="input-group">

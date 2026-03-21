@@ -2051,7 +2051,13 @@ document.addEventListener('DOMContentLoaded', () => {
         abFechaPP1.textContent = '...';
         abFechaV.textContent = '...';
         abSaldoUsd.textContent = '...';
-        abonosHistoryBody.innerHTML = `<tr><td colspan="6" class="loading-cell"><div class="loader"></div></td></tr>`;
+        const abBI = document.getElementById('abBaseImponible');
+        const abIVA = document.getElementById('abIVA');
+        const abEx = document.getElementById('abExento');
+        if (abBI) abBI.textContent = '...';
+        if (abIVA) abIVA.textContent = '...';
+        if (abEx) abEx.textContent = '...';
+        abonosHistoryBody.innerHTML = `<tr><td colspan="7" class="loading-cell"><div class="loader"></div></td></tr>`;
 
         const abTasaBadge = document.getElementById('abTasaBadge');
         if (abTasaBadge) abTasaBadge.textContent = 'Tasa: —';
@@ -2080,6 +2086,17 @@ document.addEventListener('DOMContentLoaded', () => {
         abMontoOrigBs.textContent = formatBs(d.Monto);
         abMontoOrigUsd.textContent = usdFormatter(d.MontoOriginalUSD);
 
+        // Fiscal breakdown: Base Imponible, IVA, Exento
+        const tGravable = d.TGravable || 0;
+        const mtoTax = d.MtoTax || 0;
+        const exento = Math.max(0, (d.Monto || 0) - tGravable - mtoTax);
+        const abBIel = document.getElementById('abBaseImponible');
+        const abIVAel = document.getElementById('abIVA');
+        const abExel = document.getElementById('abExento');
+        if (abBIel) abBIel.textContent = formatBs(tGravable);
+        if (abIVAel) abIVAel.textContent = formatBs(mtoTax);
+        if (abExel) abExel.textContent = formatBs(exento);
+
         const baseDate = d.BaseDiasCredito === 'EMISION' ? d.FechaE : (d.FechaI || d.FechaE);
         abFechaBase.textContent = formatDate(baseDate);
         abFechaNI.textContent = formatDate(d.FechaNI_Calculada);
@@ -2095,9 +2112,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Render History
         if (d.HistorialAbonos && d.HistorialAbonos.length > 0) {
+            const tipoBadge = (tipo) => {
+                const map = {
+                    'PAGO': '<span class="status-badge status-paid">Pago</span>',
+                    'RETENCION_IVA': '<span class="status-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa;">Ret. IVA</span>',
+                    'NOTA_CREDITO': '<span class="status-badge" style="background:rgba(59,130,246,0.15);color:#60a5fa;">N/C</span>'
+                };
+                return map[tipo] || `<span class="status-badge">${tipo || 'Pago'}</span>`;
+            };
             abonosHistoryBody.innerHTML = d.HistorialAbonos.map(a => `
                 <tr>
                     <td>${formatDate(a.FechaAbono)}</td>
+                    <td>${tipoBadge(a.TipoAbono)}</td>
                     <td class="amount">${formatBs(a.MontoBsAbonado)}</td>
                     <td>${bsFormatter(a.TasaCambioDiaAbono)}</td>
                     <td>${a.AplicaIndexacion ? '<span class="status-badge status-overdue">Sí</span>' : '<span class="status-badge status-paid">No</span>'}</td>
@@ -2106,7 +2132,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </tr>
             `).join('');
         } else {
-            abonosHistoryBody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No hay abonos registrados.</td></tr>`;
+            abonosHistoryBody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No hay abonos registrados.</td></tr>`;
         }
 
         // Show tasa for the invoice's BASE DATE (Emisión or Entrega) in the badge
@@ -2391,6 +2417,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const n10 = item.Notas10;
         document.getElementById('ieNotas10').value = (n10 !== null && n10 !== undefined && String(n10).trim() === '1') ? '1' : '';
         document.getElementById('ieMontoFacturaBS').value = item.Monto || 0;
+        document.getElementById('ieTGravable').value = item.TGravable || 0;
         document.getElementById('invoiceEditSubtitle').textContent = `Factura: ${item.NumeroD} | ${item.Descrip || ''}`;
         
         // Save cod_prov in the form for the PATCH request
@@ -2414,6 +2441,7 @@ document.addEventListener('DOMContentLoaded', () => {
             SaldoAct: parseFloat(document.getElementById('ieSaldoAct').value) || 0,
             Notas10: document.getElementById('ieNotas10').value || "",
             MontoFacturaBS: parseFloat(document.getElementById('ieMontoFacturaBS').value) || 0,
+            TGravable: parseFloat(document.getElementById('ieTGravable').value) || 0,
             CodProv: invoiceEditForm.dataset.codProv || ""
         };
         // Only include Notas10 if user explicitly chose a value
