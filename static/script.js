@@ -2052,6 +2052,9 @@ document.addEventListener('DOMContentLoaded', () => {
         abFechaV.textContent = '...';
         abSaldoUsd.textContent = '...';
         abonosHistoryBody.innerHTML = `<tr><td colspan="6" class="loading-cell"><div class="loader"></div></td></tr>`;
+
+        const abTasaBadge = document.getElementById('abTasaBadge');
+        if (abTasaBadge) abTasaBadge.textContent = 'Tasa: —';
     };
 
     const fetchCxpStatus = async (codProv, numeroD) => {
@@ -2106,6 +2109,30 @@ document.addEventListener('DOMContentLoaded', () => {
             abonosHistoryBody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No hay abonos registrados.</td></tr>`;
         }
 
+        // Show tasa for the invoice's BASE DATE (Emisión or Entrega) in the badge
+        const baseDateStr = d.BaseDiasCredito === 'EMISION'
+            ? (d.FechaE || '').split('T')[0]
+            : ((d.FechaI || d.FechaE || '').split('T')[0]);
+        const baseDateLabel = d.BaseDiasCredito === 'EMISION' ? 'Tasa Emis.' : 'Tasa Entr.';
+        const abTasaBadge = document.getElementById('abTasaBadge');
+        if (abTasaBadge && baseDateStr) {
+            abTasaBadge.textContent = `${baseDateLabel}: ...`;
+            fetch(`/api/exchange-rate?fecha=${encodeURIComponent(baseDateStr)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(json => {
+                    if (json && json.rate) {
+                        abTasaBadge.textContent = `${baseDateLabel}: ${json.rate.toFixed(2)}`;
+                        abTasaBadge.style.color = 'var(--primary-accent)';
+                        abTasaBadge.style.borderColor = 'rgba(99,102,241,0.4)';
+                        abTasaBadge.title = `Tasa BCV del d\u00eda de ${d.BaseDiasCredito === 'EMISION' ? 'Emisi\u00f3n' : 'Entrega'} (${formatDate(baseDateStr)})`;
+                    } else {
+                        abTasaBadge.textContent = `${baseDateLabel}: N/D`;
+                        abTasaBadge.style.color = 'var(--text-secondary)';
+                    }
+                })
+                .catch(() => { abTasaBadge.textContent = `${baseDateLabel}: N/D`; });
+        }
+
         // Auto-check indexation based on FechaPago vs FechaNI
         checkIndexationStatus();
     };
@@ -2124,6 +2151,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok) {
                 const json = await res.json();
                 abTasa.value = json.rate ? json.rate.toFixed(4) : '';
+
                 checkIndexationStatus();
                 fillDefaultPaymentAmount();
                 calculateUsdAmount();
@@ -2354,13 +2382,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!item) return;
 
         document.getElementById('ieNumeroD').value = item.NumeroD || '';
+        document.getElementById('ieCodProv').value = item.CodProv || '';
         document.getElementById('ieFechaE').value = (item.FechaE || '').split('T')[0];
         document.getElementById('ieFechaI').value = (item.FechaI || '').split('T')[0];
         document.getElementById('ieFechaV').value = (item.FechaV || '').split('T')[0];
         document.getElementById('ieSaldoAct').value = item.Saldo || 0;
-        document.getElementById('ieMontoFacturaUSD').value = item.MontoOriginalUSD || (parseFloat(item.Monto||0) / (parseFloat(item.TasaEmision)||1)).toFixed(2);
+        // Notas10: '1' means indexed, anything else means not
+        const n10 = item.Notas10;
+        document.getElementById('ieNotas10').value = (n10 !== null && n10 !== undefined && String(n10).trim() === '1') ? '1' : '';
         document.getElementById('ieMontoFacturaBS').value = item.Monto || 0;
         document.getElementById('invoiceEditSubtitle').textContent = `Factura: ${item.NumeroD} | ${item.Descrip || ''}`;
+        
+        // Save cod_prov in the form for the PATCH request
+        invoiceEditForm.dataset.codProv = item.CodProv || '';
 
         invoiceEditModal?.classList.add('active');
         lucide.createIcons();
@@ -2369,16 +2403,23 @@ document.addEventListener('DOMContentLoaded', () => {
     invoiceEditForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const numeroD = document.getElementById('ieNumeroD').value;
+        const codProv = document.getElementById('ieCodProv').value;
         if (!numeroD) return;
 
+        const notas10Val = document.getElementById('ieNotas10')?.value;
         const payload = {
             FechaE: document.getElementById('ieFechaE').value || null,
             FechaI: document.getElementById('ieFechaI').value || null,
             FechaV: document.getElementById('ieFechaV').value || null,
             SaldoAct: parseFloat(document.getElementById('ieSaldoAct').value) || 0,
-            MontoFacturaUSD: parseFloat(document.getElementById('ieMontoFacturaUSD').value) || 0,
+            Notas10: document.getElementById('ieNotas10').value || "",
             MontoFacturaBS: parseFloat(document.getElementById('ieMontoFacturaBS').value) || 0,
+            CodProv: invoiceEditForm.dataset.codProv || ""
         };
+        // Only include Notas10 if user explicitly chose a value
+        if (notas10Val !== '' && notas10Val !== undefined && notas10Val !== null) {
+            payload.Notas10 = notas10Val;
+        }
 
         const saveBtn = invoiceEditForm.querySelector('button[type="submit"]');
         const origText = saveBtn.innerHTML;
@@ -2386,7 +2427,7 @@ document.addEventListener('DOMContentLoaded', () => {
         saveBtn.disabled = true;
 
         try {
-            const res = await fetch(`/api/cuentas-por-pagar/${encodeURIComponent(numeroD)}`, {
+            const res = await fetch(`/api/cuentas-por-pagar/${encodeURIComponent(numeroD)}?cod_prov=${encodeURIComponent(codProv)}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)

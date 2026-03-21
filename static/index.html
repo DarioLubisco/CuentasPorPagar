@@ -1420,7 +1420,12 @@
 
                         <div class="input-group">
                             <label>Fecha del Pago:</label>
-                            <input type="date" id="abFechaPago" class="form-control" required>
+                            <div style="display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; align-items: center;">
+                                <input type="date" id="abFechaPago" class="form-control" required style="max-width: 155px;">
+                                <div id="abTasaBadge" style="background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4); border-radius: 6px; padding: 0.4rem 0.75rem; font-size: 0.85rem; color: var(--primary-accent); font-weight: 600; white-space: nowrap; min-width: 110px; text-align: center;">
+                                    Tasa: —
+                                </div>
+                            </div>
                         </div>
 
                         <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1rem;">
@@ -1511,7 +1516,7 @@
 
     <!-- Pago Múltiple Modal -->
     <div id="pagoMultipleModal" class="modal" style="z-index: 10030;">
-        <div class="modal-content glassmorphism" style="max-width: 1100px; width: 95%;">
+        <div class="modal-content glassmorphism" style="max-width: 1375px; width: 95%;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
                 <h2 style="margin:0;"><i data-lucide="banknote" style="width:20px;height:20px;vertical-align:middle;"></i> Pago Múltiple de Facturas</h2>
                 <button class="btn-icon" onclick="closePagoMultipleModal()"><i data-lucide="x"></i></button>
@@ -1521,7 +1526,7 @@
 
             <form id="pagoMultipleForm" style="display:flex;flex-direction:column;gap:1rem;">
                 <!-- Invoice table with per-row controls -->
-                <div style="max-height:350px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;">
+                <div style="max-height:455px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;">
                     <table class="data-table" style="margin:0;font-size:0.85rem;">
                         <thead>
                             <tr>
@@ -1610,7 +1615,7 @@
 
     <!-- Generar Retención Modal (Multi-Factura) -->
     <div id="generarRetencionModal" class="modal" style="z-index: 10020;">
-        <div class="modal-content glassmorphism" style="max-width: 800px;">
+        <div class="modal-content glassmorphism" style="max-width: 1000px; width: 95%;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
                 <h2 style="margin:0;"><i data-lucide="receipt" style="width:20px;height:20px;vertical-align:middle;"></i> Generar Comprobante de Retención</h2>
                 <button class="btn-icon" onclick="closeGenerarRetencionModal()"><i data-lucide="x"></i></button>
@@ -1639,7 +1644,7 @@
                 </div>
 
                 <!-- Invoice table -->
-                <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;">
+                <div style="max-height:390px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;">
                     <table class="data-table" style="margin:0;">
                         <thead>
                             <tr>
@@ -1684,6 +1689,7 @@
             <p id="invoiceEditSubtitle" style="color:var(--text-secondary);margin-bottom:1rem;font-size:0.9rem;">Factura: -</p>
             <form id="invoiceEditForm" style="display:flex;flex-direction:column;gap:1rem;">
                 <input type="hidden" id="ieNumeroD">
+                <input type="hidden" id="ieCodProv">
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
                     <div class="input-group">
                         <label>Fecha Emisión (FechaE):</label>
@@ -1704,13 +1710,18 @@
                         <input type="number" id="ieSaldoAct" class="form-control" step="0.01" min="0">
                     </div>
                     <div class="input-group">
-                        <label>Monto Factura (USD):</label>
-                        <input type="number" id="ieMontoFacturaUSD" class="form-control" step="0.01" min="0">
-                    </div>
-                    <div class="input-group">
                         <label>Monto Factura (Bs):</label>
                         <input type="number" id="ieMontoFacturaBS" class="form-control" step="0.01" min="0">
                     </div>
+                </div>
+                <div class="input-group">
+                    <label>Cond. Indexaci&#243;n (Notas10):</label>
+                    <select id="ieNotas10" class="form-control">
+                        <option value="">Sin cambio</option>
+                        <option value="1">1 &#8212; Activa Indexaci&#243;n</option>
+                        <option value="0">0 &#8212; Sin Indexaci&#243;n</option>
+                    </select>
+                    <span style="font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.25rem; display: block;">Controla si esta factura aplica indexaci&#243;n (campo Notas10 en Saint SACOMP).</span>
                 </div>
                 <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:0.5rem;">
                     <button type="button" class="btn btn-secondary" onclick="closeInvoiceEditModal()">Cancelar</button>
@@ -1720,7 +1731,7 @@
         </div>
     </div>
 
-    <script src="script.js?v=3"></script>
+    <script src="script.js?v=6"></script>
     <script>
         lucide.createIcons();
     </script>

@@ -884,20 +884,36 @@ async def send_email_only(
 
 # PATCH endpoint to edit invoice fields - syncs all Saint tables (SAACXP + SACOMP + SAPROV)
 @app.patch("/api/cuentas-por-pagar/{numeroD}", response_model=None)
-async def editar_factura(numeroD: str, payload: dict = Body(...)):
+async def editar_factura(numeroD: str, cod_prov: str = Query(default=''), payload: dict = Body(...)):
     """
     Update invoice fields and keep Saint tables fully aligned.
-    Fields: FechaE, FechaI, FechaV, SaldoAct (maps to SAACXP.Saldo + SAPROV.Saldo delta), MontoFacturaBS, MontoFacturaUSD.
+    Fields: FechaE, FechaI, FechaV, SaldoAct (maps to SAACXP.Saldo + SAPROV.Saldo delta), MontoFacturaBS, MontoFacturaUSD, Notas10.
+    cod_prov query param is required to correctly identify the SACOMP row.
     """
+    print(f"\n[PATCH] numeroD={numeroD} cod_prov={cod_prov} payload={payload}")
+    # Write to a persistent debug file with absolute path
+    log_file = r"C:\source\CuentasPorPagar\patch_debug.log"
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{timestamp}] numeroD={numeroD} cod_prov={cod_prov} payload={payload}\n")
+    except Exception as e:
+        print(f"Error writing to log: {e}")
+
     try:
         conn = database.get_db_connection()
         cursor = conn.cursor()
+
+        # Update cod_prov from payload if provided
+        if "CodProv" in payload:
+            cod_prov = payload["CodProv"]
 
         # ── 1. SAACXP.Saldo + SAPROV.Saldo (sync using delta) ────────────────
         if "SaldoAct" in payload and payload["SaldoAct"] is not None:
             nuevo_saldo = float(payload["SaldoAct"])
             
-            # Fetch previous Saldo and CodProv to calculate delta
+            # Fetch previous Saldo to calculate delta
             cursor.execute(
                 "SELECT Saldo, CodProv FROM EnterpriseAdmin_AMC.dbo.SAACXP WHERE NumeroD = ? AND TipoCxP = '10'", 
                 (numeroD,)
@@ -906,8 +922,10 @@ async def editar_factura(numeroD: str, payload: dict = Body(...)):
             
             if row is not None:
                 viejo_saldo = float(row.Saldo) if row.Saldo is not None else 0.0
-                cod_prov = row.CodProv
                 delta = nuevo_saldo - viejo_saldo
+                # Only use cod_prov from DB if we don't have it from payload
+                if not cod_prov:
+                    cod_prov = row.CodProv
                 
                 # Update SAACXP.Saldo
                 cursor.execute(
@@ -918,12 +936,13 @@ async def editar_factura(numeroD: str, payload: dict = Body(...)):
                 )
                 
                 # Update SAPROV.Saldo by applying the delta
-                if delta != 0 and cod_prov:
+                prov_for_delta = cod_prov or row.CodProv
+                if delta != 0 and prov_for_delta:
                     cursor.execute(
                         """UPDATE EnterpriseAdmin_AMC.dbo.SAPROV
                            SET Saldo = Saldo + ?
                            WHERE CodProv = ?""",
-                        (delta, cod_prov)
+                        (delta, prov_for_delta)
                     )
 
         # ── 2. SAACXP: Monto si cambia MontoFacturaBS ─────────────────────────
@@ -958,13 +977,38 @@ async def editar_factura(numeroD: str, payload: dict = Body(...)):
             comp_fields.append("MtoTotal = ?")     # keep MtoTotal aligned
             comp_params.append(monto_bs)
 
+        if "Notas10" in payload:
+            notas10_val = str(payload["Notas10"]).strip() if payload["Notas10"] is not None else ""
+            if notas10_val == "1":
+                comp_fields.append("Notas10 = ?")
+                comp_params.append("1")
+            elif notas10_val == "0" or notas10_val == "":
+                # '0' or 'Sin cambio' means clear the field
+                comp_fields.append("Notas10 = NULL")
+
         if comp_fields:
             set_clause = ", ".join(comp_fields)
-            comp_params.append(numeroD) # type: ignore
-            cursor.execute(
-                f"UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET {set_clause} WHERE NumeroD = ?",
-                tuple(comp_params)
-            )
+            # Filter by both CodProv and NumeroD to match the JOIN used in SELECT
+            logging.info(f"[PATCH SACOMP] numeroD={numeroD} cod_prov={cod_prov!r} fields={comp_fields} params={comp_params}")
+            if cod_prov:
+                comp_params.append(cod_prov)
+                comp_params.append(numeroD)
+                logging.info(f"[PATCH SACOMP] SQL: UPDATE SACOMP SET {set_clause} WHERE CodProv=? AND NumeroD=?  params={tuple(comp_params)}")
+                cursor.execute(
+                    f"UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET {set_clause} WHERE CodProv = ? AND NumeroD = ?",
+                    tuple(comp_params)
+                )
+                logging.info(f"[PATCH SACOMP] rowcount={cursor.rowcount}")
+            else:
+                comp_params.append(numeroD) # type: ignore
+                cursor.execute(
+                    f"UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET {set_clause} WHERE NumeroD = ?",
+                    tuple(comp_params)
+                )
+            
+            print(f"[PATCH SACOMP] Affected Rows: {cursor.rowcount}")
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"[PATCH SACOMP] Affected Rows: {cursor.rowcount}\n")
 
         conn.commit()
         return {"message": f"Factura {numeroD} actualizada y tablas Saint sincronizadas correctamente."}
