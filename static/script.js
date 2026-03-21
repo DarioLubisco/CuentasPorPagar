@@ -2052,6 +2052,12 @@ document.addEventListener('DOMContentLoaded', () => {
         abFechaV.textContent = '...';
         abSaldoUsd.textContent = '...';
         abonosHistoryBody.innerHTML = `<tr><td colspan="6" class="loading-cell"><div class="loader"></div></td></tr>`;
+
+        const abTasaBadge = document.getElementById('abTasaBadge');
+        if (abTasaBadge) {
+            abTasaBadge.textContent = 'Tasa: —';
+            abTasaBadge.style.display = 'none';
+        }
     };
 
     const fetchCxpStatus = async (codProv, numeroD) => {
@@ -2108,6 +2114,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Auto-check indexation based on FechaPago vs FechaNI
         checkIndexationStatus();
+
+        // Show tasa for the invoice's BASE DATE (Emisión or Entrega) in the badge
+        const baseDateStr = d.BaseDiasCredito === 'EMISION'
+            ? (d.FechaE || '').split('T')[0]
+            : ((d.FechaI || d.FechaE || '').split('T')[0]);
+        const baseDateLabel = d.BaseDiasCredito === 'EMISION' ? 'Tasa Emis.' : 'Tasa Entr.';
+        const abTasaBadge = document.getElementById('abTasaBadge');
+        if (abTasaBadge && baseDateStr) {
+            abTasaBadge.style.display = 'inline-block';
+            abTasaBadge.textContent = `${baseDateLabel}: ...`;
+            fetch(`/api/exchange-rate?fecha=${encodeURIComponent(baseDateStr)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then(json => {
+                    if (json && json.rate) {
+                        abTasaBadge.textContent = `${baseDateLabel}: ${json.rate.toFixed(2)}`;
+                        abTasaBadge.style.color = 'var(--primary-accent)';
+                        abTasaBadge.style.borderColor = 'rgba(99,102,241,0.4)';
+                        abTasaBadge.title = `Tasa BCV del d\u00eda de ${d.BaseDiasCredito === 'EMISION' ? 'Emisi\u00f3n' : 'Entrega'} (${formatDate(baseDateStr)})`;
+                    } else {
+                        abTasaBadge.textContent = `${baseDateLabel}: N/D`;
+                    }
+                })
+                .catch(() => { abTasaBadge.textContent = `${baseDateLabel}: N/D`; });
+        }
     };
 
     const updateExchangeRate = async () => {
@@ -2358,9 +2388,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('ieFechaI').value = (item.FechaI || '').split('T')[0];
         document.getElementById('ieFechaV').value = (item.FechaV || '').split('T')[0];
         document.getElementById('ieSaldoAct').value = item.Saldo || 0;
-        document.getElementById('ieMontoFacturaUSD').value = item.MontoOriginalUSD || (parseFloat(item.Monto||0) / (parseFloat(item.TasaEmision)||1)).toFixed(2);
+        // Notas10: '1' means indexed, anything else means not
+        const n10 = item.Notas10;
+        document.getElementById('ieNotas10').value = (n10 !== null && n10 !== undefined && String(n10).trim() === '1') ? '1' : '';
         document.getElementById('ieMontoFacturaBS').value = item.Monto || 0;
         document.getElementById('invoiceEditSubtitle').textContent = `Factura: ${item.NumeroD} | ${item.Descrip || ''}`;
+        
+        // Save cod_prov in the form for the PATCH request
+        invoiceEditForm.dataset.codProv = item.CodProv || '';
 
         invoiceEditModal?.classList.add('active');
         lucide.createIcons();
@@ -2376,8 +2411,9 @@ document.addEventListener('DOMContentLoaded', () => {
             FechaI: document.getElementById('ieFechaI').value || null,
             FechaV: document.getElementById('ieFechaV').value || null,
             SaldoAct: parseFloat(document.getElementById('ieSaldoAct').value) || 0,
-            MontoFacturaUSD: parseFloat(document.getElementById('ieMontoFacturaUSD').value) || 0,
+            Notas10: document.getElementById('ieNotas10').value || "",
             MontoFacturaBS: parseFloat(document.getElementById('ieMontoFacturaBS').value) || 0,
+            CodProv: invoiceEditForm.dataset.codProv || ""
         };
 
         const saveBtn = invoiceEditForm.querySelector('button[type="submit"]');
