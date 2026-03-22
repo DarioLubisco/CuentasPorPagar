@@ -649,6 +649,7 @@ def safe_send_email(destinatario: str, proveedor_nombre: str, nro_factura: str, 
 async def registrar_abonos_batch(
     pagos_json: str = Form(...),
     NotificarCorreo: bool = Form(False),
+    MontoTotalPagado: float = Form(0.0),
     archivo: UploadFile = File(None)
 ):
     """Register multiple payments in one transaction and send one consolidated email."""
@@ -682,6 +683,28 @@ async def registrar_abonos_batch(
                 p.get('Referencia', ''), filepath, 1 if NotificarCorreo else 0
             ))
         
+        # Phase 5: Excess payment as Credit Note
+        total_abonos = sum(float(p.get('MontoBsAbonado', 0)) for p in pagos)
+        excedente = MontoTotalPagado - total_abonos
+        if excedente > 0.01:
+            # Create Credit Note Request using first invoice as reference
+            ref_p = pagos[0]
+            tasa = float(ref_p.get('TasaCambioDiaAbono', 0))
+            cursor.execute("""
+                INSERT INTO EnterpriseAdmin_AMC.Procurement.CreditNotesTracking
+                (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Estatus, Observacion)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                ref_p['CodProv'], 
+                ref_p['NumeroD'],
+                'PAGO_EXCESO',
+                excedente,
+                tasa,
+                excedente / tasa if tasa > 0 else 0,
+                'PENDIENTE',
+                f"Excedente de pago lote ({len(pagos)} facturas)"
+            ))
+
         conn.commit()
         
         email_sent = False
@@ -736,6 +759,7 @@ async def registrar_abono(
     AplicaIndexacion: str = Form(...),
     Referencia: str = Form(""),
     NotificarCorreo: bool = Form(False),
+    MontoTotalPagado: float = Form(0.0),
     force_send: bool = Form(False),
     archivo: UploadFile = File(None)
 ):
@@ -791,6 +815,21 @@ async def registrar_abono(
                 logging.info(f"Email sent flag: {email_sent}")
             else:
                 logging.warning(f"No notification sent: missing email or provider logic cod={CodProv}")
+
+        # Phase 5: Excess payment as Credit Note
+        excedente = MontoTotalPagado - MontoBsAbonado
+        if excedente > 0.01:
+            cursor.execute("""
+                INSERT INTO EnterpriseAdmin_AMC.Procurement.CreditNotesTracking
+                (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Estatus, Observacion)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                CodProv, NumeroD, 'PAGO_EXCESO',
+                excedente, TasaCambioDiaAbono,
+                excedente / TasaCambioDiaAbono if TasaCambioDiaAbono > 0 else 0,
+                'PENDIENTE',
+                f"Excedente de pago factura {NumeroD}"
+            ))
 
         conn.commit()
         return {"message": "Abono registrado exitosamente.", "email_sent": (notificar == 1 or force == 1)}
@@ -2681,7 +2720,7 @@ async def export_retenciones_txt(desde: Optional[str] = None, hasta: Optional[st
 # NOTAS DE CRÉDITO MODULE
 # ═══════════════════════════════════════════════════════════
 
-@app.get("/api/credit-notes")
+@app.get("/api/procurement/credit-notes")
 async def get_credit_notes(cod_prov: Optional[str] = None, estatus: Optional[str] = None):
     try:
         conn = database.get_db_connection()
@@ -2716,7 +2755,7 @@ async def get_credit_notes(cod_prov: Optional[str] = None, estatus: Optional[str
     finally:
         if 'conn' in locals(): conn.close()
 
-@app.get("/api/credit-notes/pending/{cod_prov}")
+@app.get("/api/procurement/credit-notes/pending/{cod_prov}")
 async def get_pending_credit_notes(cod_prov: str):
     try:
         conn = database.get_db_connection()
@@ -2742,7 +2781,7 @@ async def get_pending_credit_notes(cod_prov: str):
     finally:
         if 'conn' in locals(): conn.close()
 
-@app.post("/api/credit-notes")
+@app.post("/api/procurement/credit-notes")
 async def create_credit_note(payload: dict = Body(...)):
     try:
         conn = database.get_db_connection()
@@ -2771,7 +2810,7 @@ async def create_credit_note(payload: dict = Body(...)):
     finally:
         if 'conn' in locals(): conn.close()
 
-@app.patch("/api/credit-notes/{id_nc}")
+@app.patch("/api/procurement/credit-notes/{id_nc}")
 async def update_credit_note(id_nc: int, payload: dict = Body(...)):
     try:
         conn = database.get_db_connection()

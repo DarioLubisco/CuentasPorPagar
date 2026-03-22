@@ -450,9 +450,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="amount us-amount">${usdFormatter(montoUsd)}</td>
                     <td>${getStatusHtml(item)}</td>
                     <td>
-                        <button class="btn-icon" title="Gestionar Abonos" onclick="openAbonosPanel('${item.CodProv}', '${item.NumeroD}')">
-                            <i data-lucide="calculator" size="18"></i>
-                        </button>
+                        <div style="display:flex; gap:0.4rem;">
+                            <button class="btn-icon" title="Gestionar Abonos" onclick="openAbonosPanel('${item.CodProv}', '${item.NumeroD}')">
+                                <i data-lucide="calculator" size="16"></i>
+                            </button>
+                            <button class="btn-icon" title="Generar Retenci&#243;n" onclick="openRetencionFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#eab308;">
+                                <i data-lucide="receipt" size="16"></i>
+                            </button>
+                            <button class="btn-icon" title="Nota de Cr&#233;dito" onclick="openNCFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#10b981;">
+                                <i data-lucide="file-plus" size="16"></i>
+                            </button>
+                            <button class="btn-icon" title="Nota de D&#233;bito" onclick="openNDFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#ef4444;">
+                                <i data-lucide="file-minus" size="16"></i>
+                            </button>
+                        </div>
                     </td>
                 </tr>
             `;
@@ -654,6 +665,7 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (viewId === 'forecast-consolidated') fetchForecastConsolidated();
         else if (viewId === 'forecast-events') fetchForecastEvents();
         else if (viewId === 'debit-notes') fetchDebitNotes();
+        else if (viewId === 'credit-notes') fetchCreditNotes();
         else if (viewId === 'dpo') fetchDpo();
         else if (viewId === 'expense-templates') fetchExpenseTemplates();
         else if (viewId === 'expense-batch') fetchSavedBatch();
@@ -866,6 +878,155 @@ document.addEventListener('DOMContentLoaded', () => {
             lucide.createIcons();
         }
     });
+
+    // --- Credit Notes Logic ---
+    const fetchCreditNotes = async () => {
+        const tbody = document.getElementById('creditNotesTableBody');
+        if (!tbody) return;
+
+        tbody.innerHTML = `<tr><td colspan="10" class="loading-cell"><div class="loader"></div><p>Cargando notas de crédito...</p></td></tr>`;
+
+        try {
+            const provFilter = document.getElementById('cnFilterProv')?.value || "";
+            const statusFilter = document.getElementById('cnFilterEstatus')?.value || "";
+            let url = `/api/procurement/credit-notes?estatus=${statusFilter}`;
+            if (provFilter) url += `&search=${encodeURIComponent(provFilter)}`;
+
+            const res = await fetch(url);
+            if (!res.ok) throw new Error("Error loading credit notes");
+            const data = await res.json();
+
+            if (!data.data || data.data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--text-secondary);">No hay notas de crédito registradas.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = data.data.map(d => {
+                const isPendiente = d.Estatus === 'PENDIENTE';
+                return `
+                <tr>
+                    <td>${d.CodProv}</td>
+                    <td title="${d.Observacion || ''}">${d.NumeroD || '-'}</td>
+                    <td><span class="badge badge-info" style="background: rgba(99,102,241,0.15); color: var(--primary-accent); padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">${d.Motivo}</span></td>
+                    <td class="amount">${formatBs(d.MontoBs)}</td>
+                    <td class="amount">${(parseFloat(d.TasaCambio) || 0).toFixed(4)}</td>
+                    <td class="amount us-amount" style="font-weight: 600;">${usdFormatter(d.MontoUsd || 0)}</td>
+                    <td>${formatDate(d.FechaSolicitud)}</td>
+                    <td style="text-align: center;">
+                        <span class="status-badge ${d.Estatus === 'PENDIENTE' ? 'status-pending' : (d.Estatus === 'APLICADA' ? 'status-paid' : 'status-overdue')}">
+                            ${d.Estatus}
+                        </span>
+                    </td>
+                    <td>${d.NotaCreditoID || '-'}</td>
+                    <td style="text-align: center;">
+                        <div style="display: flex; gap: 0.5rem; justify-content: center;">
+                            ${isPendiente ? `
+                                <button class="btn btn-sm btn-primary" onclick="applyCreditNote(${d.ID})" title="Aplicar como Abono" style="padding: 0.2rem 0.5rem;">
+                                    <i data-lucide="check" style="width:14px;height:14px;"></i>
+                                </button>
+                                <button class="btn btn-sm btn-secondary" onclick="anularCreditNote(${d.ID})" title="Anular" style="padding: 0.2rem 0.5rem; color: var(--danger);">
+                                    <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+                                </button>
+                            ` : '-'}
+                        </div>
+                    </td>
+                </tr>
+            `}).join('');
+            lucide.createIcons();
+        } catch (e) {
+            console.error(e);
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; color: var(--danger);">Error al cargar notas de crédito.</td></tr>`;
+        }
+    };
+
+    const ncnModal = document.getElementById('newCreditNoteModal');
+    const ncnForm = document.getElementById('newCreditNoteForm');
+    
+    window.openNewCreditNoteModal = () => {
+        ncnForm.reset();
+        const tasaInp = document.getElementById('cncTasa');
+        if (tasaInp) tasaInp.value = window.currentTasaBCV || 0;
+        ncnModal.classList.add('active');
+    };
+    window.closeNewCreditNoteModal = () => ncnModal.classList.remove('active');
+
+    document.getElementById('btnNewCreditNote')?.addEventListener('click', openNewCreditNoteModal);
+    document.getElementById('refreshCreditNotesBtn')?.addEventListener('click', fetchCreditNotes);
+    document.getElementById('cnFilterProv')?.addEventListener('input', () => {
+        clearTimeout(fetchTimeout);
+        fetchTimeout = setTimeout(fetchCreditNotes, 500);
+    });
+    document.getElementById('cnFilterEstatus')?.addEventListener('change', fetchCreditNotes);
+
+    ncnForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = ncnForm.querySelector('button[type="submit"]');
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<i class="loader" style="width:14px;height:14px;border-color:#fff;border-bottom-color:transparent;"></i>';
+        btn.disabled = true;
+
+        const rawCodProv = document.getElementById('cncCodProv').value;
+        const payload = {
+            CodProv: rawCodProv.split(' - ')[0],
+            NumeroD: document.getElementById('cncNumeroD').value || null,
+            Motivo: document.getElementById('cncMotivo').value,
+            MontoBs: parseFloat(document.getElementById('cncMontoBs').value),
+            Tasa: parseFloat(document.getElementById('cncTasa').value),
+            Observacion: document.getElementById('cncObservacion').value
+        };
+
+        try {
+            const res = await fetch('/api/procurement/credit-notes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error("Error al crear NC");
+            showToast('✅ Solicitud de Nota de Crédito registrada.', 'success');
+            closeNewCreditNoteModal();
+            fetchCreditNotes();
+        } catch (e) {
+            showToast('❌ Error al registrar solicitud.', 'error');
+        } finally {
+            btn.innerHTML = orig;
+            btn.disabled = false;
+        }
+    });
+
+    window.anularCreditNote = async (id) => {
+        if (!confirm('¿Desea anular esta solicitud de Nota de Crédito?')) return;
+        try {
+            const res = await fetch(`/api/procurement/credit-notes/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ Estatus: 'ANULADA' })
+            });
+            if (!res.ok) throw new Error("Error");
+            showToast('Nota de crédito anulada.', 'success');
+            fetchCreditNotes();
+        } catch (e) {
+            showToast('Error al anular.', 'error');
+        }
+    };
+
+    window.applyCreditNote = async (id) => {
+        const ncId = prompt('Ingrese el Número de Nota de Crédito emitido en Saint (opcional):');
+        if (ncId === null) return; // cancelled
+
+        try {
+            const res = await fetch(`/api/procurement/credit-notes/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ Estatus: 'APLICADA', NotaCreditoID: ncId })
+            });
+            if (!res.ok) throw new Error("Error");
+            showToast('✅ Nota de crédito marcada como APLICADA.', 'success');
+            fetchCreditNotes();
+        } catch (e) {
+            showToast('Error al aplicar.', 'error');
+        }
+    };
+
     window.comprasChartInstance = null;
     const refreshComprasBtn = document.getElementById('refreshComprasBtn');
     const comprasDesde = document.getElementById('comprasDesde');
@@ -2498,7 +2659,20 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('pmTotalMontoBs').textContent = totalBs.toFixed(2);
             document.getElementById('pmTotalMontoUsd').textContent = totalUsd.toFixed(2);
             document.getElementById('pmTotalSaldoUsd').textContent = totalSaldo.toFixed(2);
+
+            // Excess calc
+            const montoReal = parseFloat(document.getElementById('pmMontoTotalReal')?.value) || 0;
+            const diff = montoReal - totalBs;
+            const group = document.getElementById('pmExcedenteGroup');
+            if (diff > 0.01) {
+                group.style.display = 'block';
+                document.getElementById('pmExcedenteVal').textContent = `Bs.S ${bsFormatter(diff)}`;
+            } else {
+                group.style.display = 'none';
+            }
         };
+
+        document.getElementById('pmMontoTotalReal')?.addEventListener('input', pmRecalcTotals);
 
         const pmCalcRowUsd = (row) => {
             const bs = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
@@ -2675,6 +2849,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const formData = new FormData();
             formData.append('pagos_json', JSON.stringify(pagos));
             formData.append('NotificarCorreo', notificar);
+            const montoReal = parseFloat(document.getElementById('pmMontoTotalReal')?.value) || 0;
+            formData.append('MontoTotalPagado', montoReal);
             if (fileInput && fileInput.files.length > 0) {
                 formData.append('archivo', fileInput.files[0]);
             }
@@ -3046,7 +3222,69 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Trigger fetchRetenciones when the view is opened via SPA routing link
+
+        // Trigger fetchRetenciones when the view is opened via SPA routing link
         document.querySelector('.nav-item[data-view="retenciones"]')?.addEventListener('click', fetchRetenciones);
     }
+
+    // --- Phase 5: Helper Functions for Direct Actions ---
+    window.openRetencionFromMain = (codProv, numeroD) => {
+        const item = window.currentData?.find(d => d.CodProv === codProv && d.NumeroD === numeroD);
+        if (!item) return;
+        document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
+        const cb = document.querySelector(`.row-checkbox[data-nrounico="${item.NroUnico}"]`);
+        if (cb) cb.checked = true;
+        recalculateSelection();
+        document.getElementById('btnGenerarRetencion')?.click();
+    };
+
+    window.openNCFromMain = (codProv, numeroD) => {
+        openNewCreditNoteModal();
+        setTimeout(() => {
+            const codProvInput = document.getElementById('cncCodProv');
+            const numDInput = document.getElementById('cncNumeroD');
+            const montoBsInput = document.getElementById('cncMontoBs');
+            const tasaInput = document.getElementById('cncTasa');
+            const provider = window.allProviders?.find(p => p.CodProv === codProv);
+            if (codProvInput) codProvInput.value = provider ? `${provider.CodProv} - ${provider.Descrip}` : codProv;
+            if (numDInput) numDInput.value = numeroD;
+            const item = window.currentData?.find(d => d.CodProv === codProv && d.NumeroD === numeroD);
+            if (item) {
+                if (montoBsInput) montoBsInput.value = (parseFloat(item.Saldo) || 0).toFixed(2);
+                if (tasaInput) tasaInput.value = (parseFloat(item.TasaActual) || 0).toFixed(4);
+            }
+        }, 100);
+    };
+
+    window.openNDFromMain = (codProv, numeroD) => {
+        const item = window.currentData?.find(d => d.CodProv === codProv && d.NumeroD === numeroD);
+        if (!item) return;
+        document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
+        const cb = document.querySelector(`.row-checkbox[data-nrounico="${item.NroUnico}"]`);
+        if (cb) cb.checked = true;
+        recalculateSelection();
+        showToast('Factura seleccionada. Use "Recibir N/D" en la vista de Notas de Débito.', 'info');
+        switchView('debit-notes');
+    };
+
+    // --- Provider Datalist Logic ---
+    window.allProviders = [];
+    window.initProvidersDatalist = async () => {
+        try {
+            const res = await fetch('/api/procurement/providers');
+            if (res.ok) {
+                const json = await res.json();
+                window.allProviders = json.data || [];
+                const datalist = document.getElementById('datalistProviders');
+                if (datalist) {
+                    datalist.innerHTML = window.allProviders.map(p => 
+                        `<option value="${p.CodProv} - ${p.Descrip}">`
+                    ).join('');
+                }
+            }
+        } catch (e) { console.error('Error in initProvidersDatalist:', e); }
+    };
+
+    initProvidersDatalist();
 
 });
