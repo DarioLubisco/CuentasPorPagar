@@ -2403,8 +2403,11 @@ document.addEventListener('DOMContentLoaded', () => {
     window.closeDynamicInvoiceStatusModal = () => dynamicInvoiceStatusModal?.classList.remove('active');
 
     document.getElementById('btnDynamicInvoiceStatus')?.addEventListener('click', () => {
-        if (!currentCxpStatus || !currentCxpStatus.data) return;
-        const d = currentCxpStatus.data;
+        if (!currentCxpStatus) {
+            console.warn("Calculadora clickeada pero currentCxpStatus es null. Asegúrese de que los datos de la factura hayan cargado.");
+            return;
+        }
+        const d = currentCxpStatus;
         const currentTasa = parseFloat(abTasa.value) || 0;
         if (!currentTasa) {
             showToast('Por favor espere a que cargue la Tasa BCV.', 'warning');
