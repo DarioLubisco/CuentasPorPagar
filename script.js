@@ -47,23 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshForecastConsolidatedBtn = document.getElementById('refreshForecastConsolidatedBtn');
 
     window.currentData = [];
-    window.globalRetConfig = {
-        TasaEmisionSource: 'SACOMP',
-        MontoUsdSource: 'Calculado'
-    };
 
-    // Fetch Global Config on Load
-    fetch('/api/retenciones/config')
-        .then(r => r.json())
-        .then(res => {
-            if (res && res.data) {
-                window.globalRetConfig = {
-                    ...window.globalRetConfig,
-                    ...res.data
-                };
-            }
-        })
-        .catch(e => console.error('Failed to load global config:', e));
     // Provider Modals
     const providerCondModal = document.getElementById('providerCondModal');
     const editProviderCondModal = document.getElementById('editProviderCondModal');
@@ -2398,62 +2382,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // --- Dynamic Invoice Status Modal ---
-    const dynamicInvoiceStatusModal = document.getElementById('dynamicInvoiceStatusModal');
-    window.closeDynamicInvoiceStatusModal = () => dynamicInvoiceStatusModal?.classList.remove('active');
-
-    document.getElementById('btnDynamicInvoiceStatus')?.addEventListener('click', () => {
-        if (!currentCxpStatus || !currentCxpStatus.data) return;
-        const d = currentCxpStatus.data;
-        const currentTasa = parseFloat(abTasa.value) || 0;
-        if (!currentTasa) {
-            showToast('Por favor espere a que cargue la Tasa BCV.', 'warning');
-            return;
-        }
-
-        const historicalTasa = (d.Factor && d.Factor > 0 && window.globalRetConfig?.TasaEmisionSource === 'SACOMP') 
-            ? parseFloat(d.Factor) 
-            : parseFloat(d.TasaEmision) || 1;
-
-        let mtoTotalUsd = (window.globalRetConfig?.MontoUsdSource === 'SACOMP' && d.MontoMEx > 0) 
-            ? parseFloat(d.MontoMEx) 
-            : ((d.Monto || 0) / historicalTasa);
-
-        let subtotalUsd = (d.TotalPrd || 0) / historicalTasa;
-        let fletesUsd = (d.Fletes || 0) / historicalTasa;
-        let d1Usd = (d.Descto1 || 0) / historicalTasa;
-        let d2Usd = (d.Descto2 || 0) / historicalTasa;
-        
-        let tGravableUsd = (d.TGravable || 0) / historicalTasa;
-        let ivaUsd = (d.MtoTax || 0) / historicalTasa;
-        let exentoUsd = Math.max(0, mtoTotalUsd - tGravableUsd - ivaUsd);
-
-        // Recalculate in BS with current Tasa
-        const newBaseBs = tGravableUsd * currentTasa;
-        const newIvaBs = ivaUsd * currentTasa;
-        const newExentoBs = exentoUsd * currentTasa;
-        const newMtoBs = mtoTotalUsd * currentTasa;
-
-        document.getElementById('dynTasaBcv').textContent = formatBs(currentTasa);
-        document.getElementById('dynSubtotalUsd').textContent = usdFormatter(subtotalUsd);
-        document.getElementById('dynMtoTotalUsd').textContent = usdFormatter(mtoTotalUsd);
-        
-        // Conditionally show Fletes/Desctos
-        let desctoFletesHtml = '';
-        if (fletesUsd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(+) Fletes:</span> <span>${usdFormatter(fletesUsd)}</span></div>`;
-        if (d1Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 1:</span> <span style="color:var(--danger);">${usdFormatter(d1Usd)}</span></div>`;
-        if (d2Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 2:</span> <span style="color:var(--danger);">${usdFormatter(d2Usd)}</span></div>`;
-        document.getElementById('dynDesctoFletesBox').innerHTML = desctoFletesHtml;
-
-        document.getElementById('dynBaseBs').textContent = formatBs(newBaseBs);
-        document.getElementById('dynIvaBs').textContent = formatBs(newIvaBs);
-        document.getElementById('dynExentoBs').textContent = formatBs(newExentoBs);
-        document.getElementById('dynMtoTotalBs').textContent = formatBs(newMtoBs);
-
-        dynamicInvoiceStatusModal?.classList.add('active');
-        lucide.createIcons();
-    });
-
     const checkIndexationStatus = () => {
         if (!currentCxpStatus || !getDateValue(abFechaPago)) return;
         const pagoDate = new Date(getDateValue(abFechaPago));
@@ -2683,17 +2611,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('ieNotas10').value = (n10 !== null && n10 !== undefined && String(n10).trim() === '1') ? '1' : '';
         document.getElementById('ieMontoFacturaBS').value = item.Monto || 0;
         document.getElementById('ieTGravable').value = item.TGravable || 0;
-        
-        // Phase 8 additional fields
-        document.getElementById('ieFactor').value = item.Factor || 0;
-        document.getElementById('ieMontoMEx').value = item.MontoMEx || 0;
-        document.getElementById('ieTotalPrd').value = item.TotalPrd || 0;
-        document.getElementById('ieFletes').value = item.Fletes || 0;
-        document.getElementById('ieDescto1').value = item.Descto1 || 0;
-        document.getElementById('ieDescto2').value = item.Descto2 || 0;
-        document.getElementById('ieContado').value = item.Contado || 0;
-        document.getElementById('ieCredito').value = item.Credito || 0;
-
         document.getElementById('invoiceEditSubtitle').textContent = `Factura: ${item.NumeroD} | ${item.Descrip || ''}`;
         
         // Save cod_prov in the form for the PATCH request
@@ -2702,40 +2619,6 @@ document.addEventListener('DOMContentLoaded', () => {
         invoiceEditModal?.classList.add('active');
         lucide.createIcons();
     });
-
-    // --- Interactive Recalculation Logic (Phase 8) ---
-    const ieFactor = document.getElementById('ieFactor');
-    const ieMontoMEx = document.getElementById('ieMontoMEx');
-    const ieMontoFacturaBS = document.getElementById('ieMontoFacturaBS');
-    const ieContado = document.getElementById('ieContado');
-    const ieCredito = document.getElementById('ieCredito');
-
-    const recalculateInvoice = (source) => {
-        let factor = parseFloat(ieFactor.value) || 0;
-        let montoMEx = parseFloat(ieMontoMEx.value) || 0;
-        let mtoBs = parseFloat(ieMontoFacturaBS.value) || 0;
-        let contado = parseFloat(ieContado.value) || 0;
-        let credito = parseFloat(ieCredito.value) || 0;
-
-        if (source === 'Factor' && factor > 0) {
-            ieMontoMEx.value = (mtoBs / factor).toFixed(2);
-        } else if (source === 'MontoMEx' && montoMEx > 0) {
-            ieFactor.value = (mtoBs / montoMEx).toFixed(4);
-        } else if (source === 'MontoFacturaBS') {
-            if (factor > 0) ieMontoMEx.value = (mtoBs / factor).toFixed(2);
-            ieCredito.value = (mtoBs - contado).toFixed(2); // Credito absorbe la deferencia
-        } else if (source === 'Contado') {
-            ieCredito.value = (mtoBs - contado).toFixed(2);
-        } else if (source === 'Credito') {
-            ieContado.value = (mtoBs - credito).toFixed(2);
-        }
-    };
-
-    ieFactor?.addEventListener('input', () => recalculateInvoice('Factor'));
-    ieMontoMEx?.addEventListener('input', () => recalculateInvoice('MontoMEx'));
-    ieMontoFacturaBS?.addEventListener('input', () => recalculateInvoice('MontoFacturaBS'));
-    ieContado?.addEventListener('input', () => recalculateInvoice('Contado'));
-    ieCredito?.addEventListener('input', () => recalculateInvoice('Credito'));
 
     invoiceEditForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -2752,14 +2635,6 @@ document.addEventListener('DOMContentLoaded', () => {
             Notas10: document.getElementById('ieNotas10').value || "",
             MontoFacturaBS: parseFloat(document.getElementById('ieMontoFacturaBS').value) || 0,
             TGravable: parseFloat(document.getElementById('ieTGravable').value) || 0,
-            Factor: parseFloat(document.getElementById('ieFactor').value) || 0,
-            MontoMEx: parseFloat(document.getElementById('ieMontoMEx').value) || 0,
-            TotalPrd: parseFloat(document.getElementById('ieTotalPrd').value) || 0,
-            Fletes: parseFloat(document.getElementById('ieFletes').value) || 0,
-            Descto1: parseFloat(document.getElementById('ieDescto1').value) || 0,
-            Descto2: parseFloat(document.getElementById('ieDescto2').value) || 0,
-            Contado: parseFloat(document.getElementById('ieContado').value) || 0,
-            Credito: parseFloat(document.getElementById('ieCredito').value) || 0,
             CodProv: invoiceEditForm.dataset.codProv || ""
         };
         // Only include Notas10 if user explicitly chose a value
@@ -3172,8 +3047,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('cfgDireccionAgente').value = data.DireccionAgente || '';
                 document.getElementById('cfgValorUT').value = data.ValorUT || 0;
                 document.getElementById('cfgProximoSecuencial').value = data.ProximoSecuencial || 1;
-                document.getElementById('cfgTasaEmisionSource').value = data.TasaEmisionSource || 'SACOMP';
-                document.getElementById('cfgMontoUsdSource').value = data.MontoUsdSource || 'Calculado';
             } catch (e) {
                 console.error('Error fetching config', e);
             }
@@ -3192,9 +3065,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 NombreAgente: document.getElementById('cfgNombreAgente').value,
                 DireccionAgente: document.getElementById('cfgDireccionAgente').value,
                 ValorUT: parseFloat(document.getElementById('cfgValorUT').value) || 0,
-                ProximoSecuencial: parseInt(document.getElementById('cfgProximoSecuencial').value) || 1,
-                TasaEmisionSource: document.getElementById('cfgTasaEmisionSource').value,
-                MontoUsdSource: document.getElementById('cfgMontoUsdSource').value
+                ProximoSecuencial: parseInt(document.getElementById('cfgProximoSecuencial').value) || 1
             };
 
             try {
@@ -3205,12 +3076,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
                 if (!res.ok) throw new Error('Error al guardar config');
                 showToast('Configuración guardada exitosamente.', 'success');
-                // Update global state immediately
-                window.globalRetConfig.TasaEmisionSource = payload.TasaEmisionSource;
-                window.globalRetConfig.MontoUsdSource = payload.MontoUsdSource;
                 closeRetConfigModal();
-                // Re-render table if needed
-                if (window.currentData.length > 0) renderTable(window.currentData);
             } catch (e) {
                 console.error(e);
                 showToast('Error al guardar.', 'error');
