@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const bsFormatter = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format;
     const usdFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format;
 
-    const formatBs = (val) => `Bs.S ${bsFormatter(val)}`;
+    const formatBs = (val) => `Bs ${bsFormatter(val)}`;
 
     // === Cashflow Params State Management ===
     const loadCashflowParams = () => {
@@ -2444,9 +2444,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const newMtoBs = mtoTotalUsd * currentTasa;
 
         // Phase 8.6: Detailed Total Breakdown
-        const isReten = d.EsReten == 1 || d.EsReten === true;
+        console.log("CXP Data for calculator:", d);
+        const isReten = d.EsReten == 1 || d.EsReten === true || String(d.EsReten) === '1';
         let porctRet = parseFloat(d.PorctRet) || 0;
-        if (isReten && porctRet === 0) porctRet = 75; // Default to 75% if subject to retention but 0 in DB
+        if (isReten && porctRet === 0) porctRet = 75; 
+        console.log(`Retention Rule: isReten=${isReten}, dbPorct=${d.PorctRet}, usedPorct=${porctRet}%`);
         
         const newRetencionBs = newIvaBs * (porctRet / 100.0);
         const newRestanteBs = newMtoBs - newRetencionBs;
