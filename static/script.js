@@ -2437,6 +2437,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const newExentoBs = exentoUsd * currentTasa;
         const newMtoBs = mtoTotalUsd * currentTasa;
 
+        // Phase 8.6: Detailed Total Breakdown
+        const porctRet = parseFloat(d.PorctRet) || 0;
+        const newRetencionBs = newIvaBs * (porctRet / 100.0);
+        const newRestanteBs = newMtoBs - newRetencionBs;
+
         document.getElementById('dynTasaBcv').textContent = formatBs(currentTasa);
         document.getElementById('dynSubtotalUsd').textContent = usdFormatter(subtotalUsd);
         document.getElementById('dynMtoTotalUsd').textContent = usdFormatter(mtoTotalUsd);
@@ -2449,8 +2454,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('dynDesctoFletesBox').innerHTML = desctoFletesHtml;
 
         document.getElementById('dynBaseBs').textContent = formatBs(newBaseBs);
+        document.getElementById('dynIvaUsd').textContent = usdFormatter(ivaUsd);
         document.getElementById('dynIvaBs').textContent = formatBs(newIvaBs);
         document.getElementById('dynExentoBs').textContent = formatBs(newExentoBs);
+        
+        document.getElementById('dynRetencionBs').textContent = formatBs(newRetencionBs);
+        document.getElementById('dynRestanteBs').textContent = formatBs(newRestanteBs);
         document.getElementById('dynMtoTotalBs').textContent = formatBs(newMtoBs);
 
         dynamicInvoiceStatusModal?.classList.add('active');

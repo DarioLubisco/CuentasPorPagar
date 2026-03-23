@@ -1128,7 +1128,8 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
                 dt_emision.dolarbcv AS TasaEmision,
                 dt_actual.dolarbcv AS TasaActual,
                 ISNULL(abonos.TotalUsdAbonado, 0) AS TotalUsdAbonado,
-                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
             FROM dbo.SAACXP cxp
             LEFT JOIN dbo.SACOMP comp ON cxp.CodProv = comp.CodProv AND cxp.NumeroD = comp.NumeroD
             LEFT JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv

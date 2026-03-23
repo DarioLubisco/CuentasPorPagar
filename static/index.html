@@ -1775,20 +1775,33 @@
 
                 <hr style="border:0; border-top:1px solid var(--border-color); margin: 0.75rem 0;">
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1rem; font-size: 0.95rem;">
+                <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 0.5rem 1rem; font-size: 0.95rem; align-items: center;">
                     <div style="color: var(--text-secondary);">Base Imponible (Recalculada):</div>
                     <div id="dynBaseBs" style="text-align: right; font-weight: 600;">Bs 0.00</div>
 
                     <div style="color: var(--text-secondary);">IVA (Recalculado):</div>
-                    <div id="dynIvaBs" style="text-align: right; font-weight: 600; color: var(--warning);">Bs 0.00</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span id="dynIvaUsd" style="color: var(--success); font-weight: 600; font-size: 0.9em; margin-left: auto; margin-right: 1rem;">$ 0.00</span>
+                        <span id="dynIvaBs" style="text-align: right; font-weight: 600; color: var(--success);">Bs 0.00</span>
+                    </div>
 
                     <div style="color: var(--text-secondary);">Exento (Recalculado):</div>
                     <div id="dynExentoBs" style="text-align: right; font-weight: 600;">Bs 0.00</div>
                 </div>
 
-                <div style="margin-top: 1rem; background: rgba(16, 185, 129, 0.1); border: 1px solid var(--success); padding: 1rem; border-radius: var(--radius-sm); text-align: center;">
-                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9rem;">Monto a Pagar + Retenciones (Estimado BS)</p>
-                    <h2 id="dynMtoTotalBs" style="margin: 0.5rem 0 0 0; color: var(--success); font-size: 1.5rem;">Bs 0.00</h2>
+                <div style="margin-top: 1rem; background: rgba(16, 185, 129, 0.1); border: 1px solid var(--success); padding: 1rem; border-radius: var(--radius-sm);">
+                    <div style="display:flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                        <span style="color: var(--text-secondary); font-size: 0.85rem;">Monto Retención (Bs):</span>
+                        <span id="dynRetencionBs" style="font-weight: 600; color: var(--warning);">Bs 0.00</span>
+                    </div>
+                    <div style="display:flex; justify-content: space-between; margin-bottom: 0.75rem;">
+                        <span style="color: var(--text-secondary); font-size: 0.85rem;">Monto Restante (Bs):</span>
+                        <span id="dynRestanteBs" style="font-weight: 600; color: var(--primary-accent);">Bs 0.00</span>
+                    </div>
+                    <div style="border-top: 1px solid rgba(16, 185, 129, 0.3); padding-top: 0.5rem; text-align: center;">
+                        <p style="margin: 0; color: var(--text-secondary); font-size: 0.85rem;">Total a Pagar (Bs):</p>
+                        <h2 id="dynMtoTotalBs" style="margin: 0.25rem 0 0 0; color: var(--success); font-size: 1.35rem;">Bs 0.00</h2>
+                    </div>
                 </div>
             </div>
         </div>
