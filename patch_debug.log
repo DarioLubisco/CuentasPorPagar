@@ -1,0 +1,22 @@
+[2026-03-20 22:32:38] numeroD=00084739 cod_prov=J-00-046724 payload={'FechaE': '2026-03-09', 'FechaI': '2026-03-09', 'FechaV': '2026-03-09', 'SaldoAct': 7147.26, 'Notas10': '', 'MontoFacturaBS': 7147.26, 'CodProv': 'J-00-046724'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-20 22:45:23] numeroD=64477835 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-08', 'FechaI': '2026-02-09', 'FechaV': '2026-03-20', 'SaldoAct': 41663.07, 'Notas10': '', 'MontoFacturaBS': 41663.07, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-20 22:55:32] numeroD=64477835 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-08', 'FechaI': '2026-02-09', 'FechaV': '2026-03-20', 'SaldoAct': 41663.07, 'Notas10': '1', 'MontoFacturaBS': 41663.07, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-20 23:00:44] numeroD=64477835 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-08', 'FechaI': '2026-02-09', 'FechaV': '2026-03-20', 'SaldoAct': 41663.07, 'Notas10': '0', 'MontoFacturaBS': 41663.07, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-20 23:06:26] numeroD=64477835 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-08', 'FechaI': '2026-02-09', 'FechaV': '2026-03-20', 'SaldoAct': 41663.07, 'Notas10': '1', 'MontoFacturaBS': 41663.07, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-21 10:28:39] numeroD=64581949 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-27', 'FechaI': '2026-02-28', 'FechaV': '2026-03-20', 'SaldoAct': 3583.68, 'Notas10': '', 'MontoFacturaBS': 3583.68, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-21 10:31:59] numeroD=64477835 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-08', 'FechaI': '2026-02-09', 'FechaV': '2026-03-20', 'SaldoAct': 49770.97, 'Notas10': '0', 'MontoFacturaBS': 49770.97, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-21 10:33:59] numeroD=64477835 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-08', 'FechaI': '2026-02-09', 'FechaV': '2026-03-20', 'SaldoAct': 49770.97, 'Notas10': '', 'MontoFacturaBS': 49770.97, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-21 10:36:15] numeroD=64586012 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-27', 'FechaI': '2026-02-28', 'FechaV': '2026-03-20', 'SaldoAct': 25235.15, 'Notas10': '', 'MontoFacturaBS': 25235.15, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-23 12:45:40] numeroD=00092540 cod_prov=J-412236709 payload={'FechaE': '2026-03-20', 'FechaI': '2026-03-23', 'FechaV': '2026-04-07', 'SaldoAct': 67437.83, 'Notas10': '', 'MontoFacturaBS': 67437.83, 'TGravable': 4170.99, 'CodProv': 'J-412236709'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-23 12:47:38] numeroD=00092540 cod_prov=J-412236709 payload={'FechaE': '2026-03-20', 'FechaI': '2026-03-23', 'FechaV': '2026-04-07', 'SaldoAct': 67437.83, 'Notas10': '', 'MontoFacturaBS': 67437.83, 'TGravable': 4170.99, 'CodProv': 'J-412236709'}
+[PATCH SACOMP] Affected Rows: 1

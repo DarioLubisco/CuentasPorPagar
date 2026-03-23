@@ -1,0 +1,312 @@
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: []
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 AND (cxp.CodProv LIKE ? OR prov.Descrip LIKE ? OR cxp.NumeroD LIKE ?) ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: ['%INSUAMINCA%', '%INSUAMINCA%', '%INSUAMINCA%']
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 AND (cxp.CodProv LIKE ? OR prov.Descrip LIKE ? OR cxp.NumeroD LIKE ?) AND ISNULL(dnt.Estatus, 'PENDIENTE') = ? ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: ['%INSUAMINCA%', '%INSUAMINCA%', '%INSUAMINCA%', 'SOLICITUD_ENVIADA']
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: []
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: []
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: []
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 AND (cxp.CodProv LIKE ? OR prov.Descrip LIKE ? OR cxp.NumeroD LIKE ?) AND ISNULL(dnt.Estatus, 'PENDIENTE') = ? ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: ['%INSUAMINCA%', '%INSUAMINCA%', '%INSUAMINCA%', 'SOLICITUD_ENVIADA']
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 AND (cxp.CodProv LIKE ? OR prov.Descrip LIKE ? OR cxp.NumeroD LIKE ?) AND ISNULL(dnt.Estatus, 'PENDIENTE') = ? ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: ['%INSUAMINCA%', '%INSUAMINCA%', '%INSUAMINCA%', 'SOLICITUD_ENVIADA']
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 AND (cxp.CodProv LIKE ? OR prov.Descrip LIKE ? OR cxp.NumeroD LIKE ?) AND ISNULL(dnt.Estatus, 'PENDIENTE') = ? ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: ['%INSUAMINCA%', '%INSUAMINCA%', '%INSUAMINCA%', 'SOLICITUD_ENVIADA']
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 AND (cxp.CodProv LIKE ? OR prov.Descrip LIKE ? OR cxp.NumeroD LIKE ?) ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: ['%INSUAMINCA%', '%INSUAMINCA%', '%INSUAMINCA%']
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 AND (cxp.CodProv LIKE ? OR prov.Descrip LIKE ? OR cxp.NumeroD LIKE ?) ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: ['%INSUAMINCA%', '%INSUAMINCA%', '%INSUAMINCA%']
+
+Query: 
+            SELECT 
+                cxp.CodProv, 
+                prov.Descrip AS ProveedorNombre,
+                cxp.NumeroD, 
+                cxp.FechaE AS FechaEmision,
+                cxp.Monto AS MontoOriginalBs,
+                ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
+                ISNULL(abonos.TotalBsAbonado, 0) - cxp.Monto AS MontoNotaDebitoBs,
+                ISNULL(dnt.Estatus, 'PENDIENTE') AS Estatus,
+                dnt.NotaDebitoID,
+                dnt.MontoRetencionBs AS DB_MontoRetencionBs,
+                COALESCE(cond.Email, prov.Email, '') AS Email,
+                ISNULL(prov.PorctRet, 0) AS PorctRet
+            FROM dbo.SAACXP cxp
+            INNER JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.DebitNotesTracking dnt ON cxp.CodProv = dnt.CodProv AND cxp.NumeroD = dnt.NumeroD
+            CROSS APPLY (
+                SELECT SUM(a.MontoBsAbonado) as TotalBsAbonado
+                FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
+                WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
+            ) abonos
+         WHERE cxp.TipoCxP = '10' AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1 AND (cxp.CodProv LIKE ? OR prov.Descrip LIKE ? OR cxp.NumeroD LIKE ?) ORDER BY prov.Descrip ASC, cxp.FechaE DESC
+Params: ['%INSUAMINCA%', '%INSUAMINCA%', '%INSUAMINCA%']
+

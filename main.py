@@ -248,6 +248,12 @@ async def get_cuentas_por_pagar(search: str = Query("", description="Search term
               SACOMP.TipoCom,
               SACOMP.Notas10,
               SACOMP.TGravable,
+              SACOMP.Factor,
+              SACOMP.MontoMEx,
+              SACOMP.TotalPrd,
+              SACOMP.Descto1,
+              SACOMP.Descto2,
+              SACOMP.Fletes,
               SAPAGCXP.NumeroD AS NumeroD_SAPAGCXP,
               dt_emision.dolarbcv AS TasaEmision,
               dt_actual.dolarbcv AS TasaActual,
@@ -672,15 +678,23 @@ async def registrar_abonos_batch(
         
         for p in pagos:
             aplica_idx = 1 if p.get('AplicaIndexacion') in [True, 'true', 'True', 1] else 0
+            
+            # Phase 8: Lookup mirror fields for independence
+            cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCom = 'H'", (p['NumeroD'],))
+            sacomp_row = cursor.fetchone()
+            tasa_orig = float(sacomp_row[0]) if sacomp_row and sacomp_row[0] else None
+            mto_orig = float(sacomp_row[1]) if sacomp_row and sacomp_row[1] else None
+
             cursor.execute("""
                 INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
-                (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, RutaComprobante, NotificarCorreo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, RutaComprobante, NotificarCorreo, TasaCambioOrig, MontoMExOrig)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 p['NumeroD'], p['CodProv'], p['FechaAbono'],
                 float(p.get('MontoBsAbonado', 0)), float(p.get('TasaCambioDiaAbono', 0)),
                 float(p.get('MontoUsdAbonado', 0)), aplica_idx,
-                p.get('Referencia', ''), filepath, 1 if NotificarCorreo else 0
+                p.get('Referencia', ''), filepath, 1 if NotificarCorreo else 0,
+                tasa_orig, mto_orig
             ))
         
         # Phase 5: Excess payment as Credit Note
@@ -690,10 +704,15 @@ async def registrar_abonos_batch(
             # Create Credit Note Request using first invoice as reference
             ref_p = pagos[0]
             tasa = float(ref_p.get('TasaCambioDiaAbono', 0))
+            cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCom = 'H'", (ref_p['NumeroD'],))
+            sacomp_row = cursor.fetchone()
+            tasa_orig = float(sacomp_row[0]) if sacomp_row and sacomp_row[0] else None
+            mto_orig = float(sacomp_row[1]) if sacomp_row and sacomp_row[1] else None
+
             cursor.execute("""
                 INSERT INTO EnterpriseAdmin_AMC.Procurement.CreditNotesTracking
-                (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Estatus, Observacion)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Estatus, Observacion, TasaCambioOrig, MontoMExOrig)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 ref_p['CodProv'], 
                 ref_p['NumeroD'],
@@ -702,7 +721,8 @@ async def registrar_abonos_batch(
                 tasa,
                 excedente / tasa if tasa > 0 else 0,
                 'PENDIENTE',
-                f"Excedente de pago lote ({len(pagos)} facturas)"
+                f"Excedente de pago lote ({len(pagos)} facturas)",
+                tasa_orig, mto_orig
             ))
 
         conn.commit()
@@ -779,16 +799,22 @@ async def registrar_abono(
             with open(filepath, "wb") as buffer:
                 shutil.copyfileobj(archivo.file, buffer)
 
+        # Phase 8: Mirror fields
+        cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCom = 'H'", (NumeroD,))
+        sacomp_row = cursor.fetchone()
+        tasa_orig = float(sacomp_row[0]) if sacomp_row and sacomp_row[0] else None
+        mto_orig = float(sacomp_row[1]) if sacomp_row and sacomp_row[1] else None
+
         insert_query = """
             INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
-            (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, RutaComprobante, NotificarCorreo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, RutaComprobante, NotificarCorreo, TasaCambioOrig, MontoMExOrig)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         cursor.execute(insert_query, (
             NumeroD, CodProv, FechaAbono,
             MontoBsAbonado, TasaCambioDiaAbono,
             MontoUsdAbonado, aplica_idx, Referencia,
-            filepath, notificar
+            filepath, notificar, tasa_orig, mto_orig
         ))
 
         # Enviar correo si corresponde (notificar o force_send)
@@ -1010,12 +1036,20 @@ async def editar_factura(numeroD: str, cod_prov: str = Query(default=''), payloa
             comp_params.append(payload["FechaV"])
             cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET FechaV = ? WHERE NumeroD = ? AND TipoCxP = '10'", (payload["FechaV"], numeroD))
             
-        if "MontoFacturaBS" in payload and payload["MontoFacturaBS"] is not None:
+        # Process new explicit fields (Phase 8 logic)
+        for field in ["Factor", "MontoMEx", "TotalPrd", "Descto1", "Descto2", "Fletes", "Contado", "Credito", "MtoTotal"]:
+            if field in payload and payload[field] is not None:
+                comp_fields.append(f"{field} = ?")
+                comp_params.append(float(payload[field]))
+
+        # Backward compatibility for MontoFacturaBS mapping if MtoTotal wasn't explicitly sent
+        if "MontoFacturaBS" in payload and payload["MontoFacturaBS"] is not None and "MtoTotal" not in payload:
             monto_bs = float(payload["MontoFacturaBS"])
-            comp_fields.append("Credito = ?")
+            comp_fields.append("MtoTotal = ?")
             comp_params.append(monto_bs)
-            comp_fields.append("MtoTotal = ?")     # keep MtoTotal aligned
-            comp_params.append(monto_bs)
+            if "Credito" not in payload:
+                comp_fields.append("Credito = ?")
+                comp_params.append(monto_bs)
 
         if "Notas10" in payload:
             notas10_val = str(payload["Notas10"]).strip() if payload["Notas10"] is not None else ""
@@ -1200,7 +1234,7 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
             conn.close()
 
 @app.get("/api/procurement/debit-notes")
-async def get_debit_notes():
+async def get_debit_notes(search: Optional[str] = None, estatus: Optional[str] = None):
     try:
         conn = database.get_db_connection()
         cursor = conn.cursor()
@@ -1230,11 +1264,28 @@ async def get_debit_notes():
                 FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
                 WHERE a.CodProv = cxp.CodProv AND a.NumeroD = cxp.NumeroD
             ) abonos
-            WHERE cxp.TipoCxP = '10' 
-              AND ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1
-            ORDER BY prov.Descrip ASC, cxp.FechaE DESC
         """
-        cursor.execute(query)
+        params = []
+        where_clauses = [
+            "cxp.TipoCxP = '10'",
+            "ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1"
+        ]
+
+        if search:
+            where_clauses.append("(cxp.CodProv LIKE ? OR prov.Descrip LIKE ? OR cxp.NumeroD LIKE ?)")
+            search_val = f"%{search}%"
+            params.extend([search_val, search_val, search_val])
+        
+        if estatus:
+            where_clauses.append("ISNULL(dnt.Estatus, 'PENDIENTE') = ?")
+            params.append(estatus)
+
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        query += " ORDER BY prov.Descrip ASC, cxp.FechaE DESC"
+        
+        cursor.execute(query, tuple(params))
         columns = [column[0] for column in cursor.description]
         results = [dict(zip(columns, row)) for row in cursor.fetchall()]
         
@@ -2081,7 +2132,7 @@ async def get_retenciones_config():
     try:
         conn = database.get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT RIF_Agente, RazonSocial_Agente, DireccionFiscal_Agente, ValorUT, UltimoSecuencial FROM EnterpriseAdmin_AMC.Procurement.Retenciones_Config WHERE Id = 1")
+        cursor.execute("SELECT RIF_Agente, RazonSocial_Agente, DireccionFiscal_Agente, ValorUT, UltimoSecuencial, TasaEmisionSource, MontoUsdSource FROM EnterpriseAdmin_AMC.Procurement.Retenciones_Config WHERE Id = 1")
         row = cursor.fetchone()
         if not row:
             return {"data": {}}
@@ -2091,7 +2142,9 @@ async def get_retenciones_config():
             "NombreAgente": row[1],
             "DireccionAgente": row[2],
             "ValorUT": float(row[3]) if row[3] else 0,
-            "ProximoSecuencial": row[4]
+            "ProximoSecuencial": row[4],
+            "TasaEmisionSource": row[5] or "SACOMP",
+            "MontoUsdSource": row[6] or "Calculado"
         }
         return {"data": data}
     except Exception as e:
@@ -2107,14 +2160,16 @@ async def update_retenciones_config(payload: dict = Body(...)):
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE EnterpriseAdmin_AMC.Procurement.Retenciones_Config 
-            SET RIF_Agente = ?, RazonSocial_Agente = ?, DireccionFiscal_Agente = ?, ValorUT = ?, UltimoSecuencial = ?
+            SET RIF_Agente = ?, RazonSocial_Agente = ?, DireccionFiscal_Agente = ?, ValorUT = ?, UltimoSecuencial = ?, TasaEmisionSource = ?, MontoUsdSource = ?
             WHERE Id = 1
         """, (
             payload.get("RifAgente"), 
             payload.get("NombreAgente"), 
             payload.get("DireccionAgente"), 
             float(payload.get("ValorUT", 0)),
-            int(payload.get("ProximoSecuencial", 0))
+            int(payload.get("ProximoSecuencial", 0)),
+            payload.get("TasaEmisionSource", "SACOMP"),
+            payload.get("MontoUsdSource", "Calculado")
         ))
         conn.commit()
         return {"message": "Configuración actualizada"}
@@ -2197,14 +2252,21 @@ async def crear_retencion(payload: dict = Body(...)):
             # Auto-register as abono in CxP_Abonos with TipoAbono='RETENCION_IVA'
             monto_retenido = float(f.get("MontoRetenido", 0))
             if monto_retenido > 0:
+                # Phase 8: Lookup mirror fields for independence
+                cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCom = 'H'", (f['NumeroD'],))
+                sacomp_row = cursor.fetchone()
+                tasa_orig = float(sacomp_row[0]) if sacomp_row and sacomp_row[0] else None
+                mto_orig = float(sacomp_row[1]) if sacomp_row and sacomp_row[1] else None
+
                 cursor.execute("""
                     INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
-                    (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, TipoAbono)
-                    VALUES (?, ?, ?, ?, 0, 0, 0, ?, 'RETENCION_IVA')
+                    (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, TipoAbono, TasaCambioOrig, MontoMExOrig)
+                    VALUES (?, ?, ?, ?, 0, 0, 0, ?, 'RETENCION_IVA', ?, ?)
                 """, (
                     f["NumeroD"], f["CodProv"], fecha_retencion,
                     monto_retenido,
-                    f"Retención IVA Comp. {nro_comprobante}"
+                    f"Retención IVA Comp. {nro_comprobante}",
+                    tasa_orig, mto_orig
                 ))
         
         # 3. Update sequential
@@ -2786,18 +2848,24 @@ async def create_credit_note(payload: dict = Body(...)):
     try:
         conn = database.get_db_connection()
         cursor = conn.cursor()
+        cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCom = 'H'", (payload["NumeroD"],))
+        sacomp_row = cursor.fetchone()
+        tasa_orig = float(sacomp_row[0]) if sacomp_row and sacomp_row[0] else None
+        mto_orig = float(sacomp_row[1]) if sacomp_row and sacomp_row[1] else None
+
         cursor.execute("""
             INSERT INTO EnterpriseAdmin_AMC.Procurement.CreditNotesTracking 
-            (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Observacion)
+            (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Observacion, TasaCambioOrig, MontoMExOrig)
             OUTPUT INSERTED.Id
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             payload["CodProv"], payload["NumeroD"], 
             payload.get("Motivo", "PAGO_EXCESO"),
             float(payload["MontoBs"]),
             float(payload.get("TasaCambio", 0)),
             float(payload.get("MontoUsd", 0)),
-            payload.get("Observacion", "")
+            payload.get("Observacion", ""),
+            tasa_orig, mto_orig
         ))
         new_id = cursor.fetchone()[0]
         conn.commit()
@@ -2833,11 +2901,17 @@ async def update_credit_note(id_nc: int, payload: dict = Body(...)):
             """, (nota_credito_id, id_nc))
             
             # Auto-register as abono
+            
+            cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCom = 'H'", (row[2],))
+            sacomp_row = cursor.fetchone()
+            tasa_orig = float(sacomp_row[0]) if sacomp_row and sacomp_row[0] else None
+            mto_orig = float(sacomp_row[1]) if sacomp_row and sacomp_row[1] else None
+
             cursor.execute("""
                 INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
-                (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, TipoAbono)
-                VALUES (?, ?, GETDATE(), ?, 0, 0, 0, ?, 'NOTA_CREDITO')
-            """, (row[2], row[1], float(row[3]), f"Nota Crédito #{nota_credito_id or id_nc}"))
+                (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, TipoAbono, TasaCambioOrig, MontoMExOrig)
+                VALUES (?, ?, GETDATE(), ?, 0, 0, 0, ?, 'NOTA_CREDITO', ?, ?)
+            """, (row[2], row[1], float(row[3]), f"Nota Crédito #{nota_credito_id or id_nc}", tasa_orig, mto_orig))
             
         elif new_status == "ANULADA" and row[0] != "ANULADA":
             cursor.execute("UPDATE EnterpriseAdmin_AMC.Procurement.CreditNotesTracking SET Estatus = 'ANULADA' WHERE Id = ?", (id_nc,))
@@ -2864,6 +2938,38 @@ async def update_credit_note(id_nc: int, payload: dict = Body(...)):
     except Exception as e:
         if 'conn' in locals(): conn.rollback()
         logging.error(f"Error updating credit note: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.delete("/api/procurement/credit-notes/{id_nc}")
+async def delete_credit_note(id_nc: int):
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT Estatus, CodProv, NumeroD, MontoBs, NotaCreditoID FROM EnterpriseAdmin_AMC.Procurement.CreditNotesTracking WHERE Id = ?", (id_nc,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Nota de Crédito no encontrada")
+        
+        estatus = row[0]
+        # Only allow deletion for PENDIENTE or ANULADA
+        # If APLICADA, we should ideally not delete or require careful handling.
+        if estatus == "APLICADA":
+            raise HTTPException(status_code=400, detail="No se puede eliminar una nota de crédito APLICADA. Primero anúlela.")
+
+        # If it was APLICADA previously and we are in ANULADA, we still want to make sure abonos are gone
+        # The logic in PATCH handles this, but here we just delete the record.
+        cursor.execute("DELETE FROM EnterpriseAdmin_AMC.Procurement.CreditNotesTracking WHERE Id = ?", (id_nc,))
+        
+        conn.commit()
+        return {"message": "Nota de crédito eliminada exitosamente."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        logging.error(f"Error deleting credit note: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if 'conn' in locals(): conn.close()

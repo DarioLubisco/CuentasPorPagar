@@ -102,11 +102,35 @@ def create_tables():
         IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='Retenciones_IVA' AND COLUMN_NAME='FacturaAfectada')
             ALTER TABLE [Procurement].[Retenciones_IVA] ADD [FacturaAfectada] VARCHAR(50) NULL;
         """)
-        
+
+        # 4b. Add toggle settings to Retenciones_Config
+        cursor.execute("""
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='Retenciones_Config' AND COLUMN_NAME='TasaEmisionSource')
+            ALTER TABLE [Procurement].[Retenciones_Config] ADD [TasaEmisionSource] VARCHAR(50) DEFAULT 'SACOMP';
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='Retenciones_Config' AND COLUMN_NAME='MontoUsdSource')
+            ALTER TABLE [Procurement].[Retenciones_Config] ADD [MontoUsdSource] VARCHAR(50) DEFAULT 'Calculado';
+        """)
+
         # 4b. Add TipoAbono column to CxP_Abonos
         cursor.execute("""
         IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='CxP_Abonos' AND COLUMN_NAME='TipoAbono')
             ALTER TABLE [dbo].[CxP_Abonos] ADD [TipoAbono] VARCHAR(20) NOT NULL CONSTRAINT DF_CxP_TipoAbono DEFAULT 'PAGO';
+        """)
+
+        # 4c. Add Mirror Fields (Phase 8) to CxP_Abonos
+        cursor.execute("""
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='CxP_Abonos' AND COLUMN_NAME='TasaCambioOrig')
+            ALTER TABLE [dbo].[CxP_Abonos] ADD [TasaCambioOrig] DECIMAL(18,4) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='CxP_Abonos' AND COLUMN_NAME='MontoMExOrig')
+            ALTER TABLE [dbo].[CxP_Abonos] ADD [MontoMExOrig] DECIMAL(18,2) NULL;
+        """)
+
+        # 4d. Add Mirror Fields (Phase 8) to CreditNotesTracking
+        cursor.execute("""
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='CreditNotesTracking' AND COLUMN_NAME='TasaCambioOrig')
+            ALTER TABLE [Procurement].[CreditNotesTracking] ADD [TasaCambioOrig] DECIMAL(18,4) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='CreditNotesTracking' AND COLUMN_NAME='MontoMExOrig')
+            ALTER TABLE [Procurement].[CreditNotesTracking] ADD [MontoMExOrig] DECIMAL(18,2) NULL;
         """)
         
         # 5. CreditNotesTracking
