@@ -1506,7 +1506,10 @@
                         <span style="color: var(--text-secondary);">Base Imponible:</span>
                         <strong id="abBaseImponible" style="text-align: right;">Bs 0.00</strong>
                         <span style="color: var(--text-secondary);">IVA:</span>
-                        <strong id="abIVA" style="text-align: right; color: var(--warning);">Bs 0.00</strong>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span id="abIvaUsd" style="color: var(--success); font-weight: 600; font-size: 0.9em; margin-left: auto; margin-right: 0.5rem;">$ 0.00</span>
+                            <strong id="abIVA" style="text-align: right; color: var(--warning);">Bs 0.00</strong>
+                        </div>
                         <span style="color: var(--text-secondary);">Exento:</span>
                         <strong id="abExento" style="text-align: right;">Bs 0.00</strong>
                     </div>
@@ -1782,7 +1785,7 @@
                     <div style="color: var(--text-secondary);">IVA (Recalculado):</div>
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span id="dynIvaUsd" style="color: var(--success); font-weight: 600; font-size: 0.9em; margin-left: auto; margin-right: 1rem;">$ 0.00</span>
-                        <span id="dynIvaBs" style="text-align: right; font-weight: 600; color: var(--success);">Bs 0.00</span>
+                        <span id="dynIvaBs" style="text-align: right; font-weight: 600; color: var(--warning);">Bs 0.00</span>
                     </div>
 
                     <div style="color: var(--text-secondary);">Exento (Recalculado):</div>

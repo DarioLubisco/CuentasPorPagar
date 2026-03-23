@@ -2302,9 +2302,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const abBIel = document.getElementById('abBaseImponible');
         const abIVAel = document.getElementById('abIVA');
         const abExel = document.getElementById('abExento');
+        const abIvaUsdEl = document.getElementById('abIvaUsd');
+
         if (abBIel) abBIel.textContent = formatBs(tGravable);
         if (abIVAel) abIVAel.textContent = formatBs(mtoTax);
         if (abExel) abExel.textContent = formatBs(exento);
+        if (abIvaUsdEl) {
+            const ivaUsd = d.TasaEmision ? (mtoTax / d.TasaEmision) : 0;
+            abIvaUsdEl.textContent = usdFormatter(ivaUsd);
+        }
 
         const baseDate = d.BaseDiasCredito === 'EMISION' ? d.FechaE : (d.FechaI || d.FechaE);
         abFechaBase.textContent = formatDate(baseDate);
