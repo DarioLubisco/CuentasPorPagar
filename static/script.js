@@ -2444,7 +2444,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const newMtoBs = mtoTotalUsd * currentTasa;
 
         // Phase 8.6: Detailed Total Breakdown
-        const porctRet = parseFloat(d.PorctRet) || 0;
+        const isReten = d.EsReten == 1 || d.EsReten === true;
+        let porctRet = parseFloat(d.PorctRet) || 0;
+        if (isReten && porctRet === 0) porctRet = 75; // Default to 75% if subject to retention but 0 in DB
+        
         const newRetencionBs = newIvaBs * (porctRet / 100.0);
         const newRestanteBs = newMtoBs - newRetencionBs;
 
