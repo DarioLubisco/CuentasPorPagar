@@ -53,14 +53,34 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Fetch Global Config on Load
-    fetch('/api/retenciones/config')
+    fetch('/api/procurement/settings')
         .then(r => r.json())
         .then(res => {
             if (res && res.data) {
                 window.globalRetConfig = {
                     ...window.globalRetConfig,
-                    ...res.data
+                    ...(res.data || {})
                 };
+                
+                // Populate Settings Form
+                const settingsForm = document.getElementById('globalSettingsForm');
+                if (settingsForm) {
+                    const TasaEmisionSourceStr = window.globalRetConfig['TasaEmisionSource'] || 'DOLARTODAY';
+                    const MontoUSDSourceStr = window.globalRetConfig['MontoUSDSource'] || 'CALCULATED';
+                    
+                    const tasaRadios = settingsForm.elements['TasaEmisionSource'];
+                    if (tasaRadios) {
+                        for (let r of tasaRadios) {
+                            if (r.value === TasaEmisionSourceStr) r.checked = true;
+                        }
+                    }
+                    const usdRadios = settingsForm.elements['MontoUSDSource'];
+                    if (usdRadios) {
+                        for (let r of usdRadios) {
+                            if (r.value === MontoUSDSourceStr) r.checked = true;
+                        }
+                    }
+                }
             }
         })
         .catch(e => console.error('Failed to load global config:', e));
@@ -147,65 +167,28 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- Date Input Helper (Force DD/MM/YYYY display) ---
-    // This trick switches between 'text' (formatted) and 'date' (native picker)
+    // --- Date Input Helper ---
+    // Note: Switching between 'text' and 'date' types dynamically causes breaking issues 
+    // on iOS Safari/Brave and desyncs when typing manually. Falling back to native HTML5.
     const setupDateInput = (input) => {
         if (!input) return;
-
-        const toDateFormat = () => {
-            if (input.type === 'date') return;
-            const raw = input.getAttribute('data-raw');
-            input.type = 'date';
-            if (raw) input.value = raw;
-        };
-
-        const toTextFormat = () => {
-            let val = input.value;
-            // If we are already in text mode, value might be formatted, check data-raw
-            if (input.type === 'text') {
-                val = input.getAttribute('data-raw') || val;
-            }
-
-            if (val && val.includes('-') && val.split('-').length === 3) {
-                const raw = val.split('T')[0];
-                input.setAttribute('data-raw', raw);
-                const parts = raw.split('-');
-                input.type = 'text';
-                input.value = `${parts[2]}/${parts[1]}/${parts[0]}`;
-            } else if (!val) {
-                input.type = 'text';
-                input.value = '';
-                input.placeholder = 'DD/MM/AAAA';
-            }
-        };
-
-        input.addEventListener('focus', toDateFormat);
-        input.addEventListener('blur', toTextFormat);
-        input.addEventListener('change', () => {
-            if (input.type === 'date') input.setAttribute('data-raw', input.value);
-            else if (input.type === 'text' && input.value.includes('-')) {
-                // If somehow value changed to raw in text mode
-                toTextFormat();
-            }
-        });
-
-        // Initial state
-        toTextFormat();
+        input.type = 'date';
+        // Remove any old event listeners if they were attached by forcing a clone, or just trust the new code doesn't attach them
     };
 
     const getDateValue = (input) => {
         if (!input) return "";
-        return input.getAttribute('data-raw') || input.value || "";
+        return input.value || "";
     };
 
     const setDateValue = (input, val) => {
         if (!input) return;
-        input.setAttribute('data-raw', val);
-        input.value = val;
-        // Trigger formatting if setupDateInput was called
-        const parts = val.split('-');
-        if (parts.length === 3) {
-            input.type = 'text';
-            input.value = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        input.type = 'date';
+        // Native date inputs require YYYY-MM-DD format
+        if (val && val.includes('T')) {
+            input.value = val.split('T')[0];
+        } else {
+            input.value = val;
         }
     };
     // -----------------------------------------------------
@@ -2380,6 +2363,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const updateExchangeRate = async () => {
         const fecha = getDateValue(abFechaPago);
+        console.log(`--- CAMBIO DE FECHA: ${fecha} ---`);
         if (!fecha) {
             abTasa.value = '';
             calculateUsdAmount();
@@ -2392,6 +2376,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok) {
                 const json = await res.json();
                 abTasa.value = json.rate ? json.rate.toFixed(4) : '';
+                console.log(`Tasa obtenida para ${fecha}: ${abTasa.value}`);
 
                 checkIndexationStatus();
                 fillDefaultPaymentAmount();
@@ -2493,6 +2478,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const fillDefaultPaymentAmount = () => {
         if (!currentCxpStatus) return;
+        
+        // No sobreescribir si el usuario ya escribió un monto
+        if (abMontoBs.value && parseFloat(abMontoBs.value) > 0) {
+            return;
+        }
 
         if (abAplicaIndex.checked) {
             const rate = parseFloat(abTasa.value) || 0;
@@ -3411,9 +3401,54 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Trigger fetchRetenciones when the view is opened via SPA routing link
-
-        // Trigger fetchRetenciones when the view is opened via SPA routing link
         document.querySelector('.nav-item[data-view="retenciones"]')?.addEventListener('click', fetchRetenciones);
+    }
+
+    // --- Settings Logic ---
+    const settingsFormElement = document.getElementById('globalSettingsForm');
+    if (settingsFormElement) {
+        settingsFormElement.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(settingsFormElement);
+            const TasaEmisionSource = formData.get('TasaEmisionSource');
+            const MontoUSDSource = formData.get('MontoUSDSource');
+
+            const payload = {};
+            if (TasaEmisionSource) payload.TasaEmisionSource = TasaEmisionSource;
+            if (MontoUSDSource) payload.MontoUSDSource = MontoUSDSource;
+
+            const btn = settingsFormElement.querySelector('button[type="submit"]');
+            btn.innerHTML = '<i class="loader" style="width:14px;height:14px;border-color:white;border-bottom-color:transparent;"></i> Guardando...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/procurement/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!res.ok) {
+                    const error = await res.json();
+                    throw new Error(error.detail || 'Error saving settings');
+                }
+                
+                showToast('Configuración global actualizada correctamente', 'success');
+                
+                // Update local memory
+                window.globalRetConfig = { ...window.globalRetConfig, ...payload };
+                
+                // Refresh active dashboard to re-evaluate formulas
+                if (typeof fetchData === 'function') fetchData();
+            } catch (err) {
+                console.error(err);
+                showToast(err.message, 'error');
+            } finally {
+                btn.innerHTML = '<i data-lucide="save"></i> Guardar Configuración';
+                btn.disabled = false;
+                if (window.lucide) lucide.createIcons();
+            }
+        });
     }
 
     // --- Phase 5: Helper Functions for Direct Actions ---

@@ -127,6 +127,10 @@
                             <i data-lucide="landmark" style="width:14px;height:14px;"></i>
                             <span>Impuestos (SEDEMATRI)</span>
                         </a>
+                        <a href="#settings" class="nav-item nav-item-sub" data-view="settings">
+                            <i data-lucide="settings" style="width:14px;height:14px;"></i>
+                            <span>Configuración General</span>
+                        </a>
                     </div>
                 </div>
             </nav>
@@ -1258,6 +1262,65 @@
                     </div>
                 </div>
             </div>
+            <!-- Settings View -->
+            <div id="view-settings" class="view-section">
+                <header class="top-header">
+                    <div class="header-left">
+                        <h1>Configuración General</h1>
+                        <p class="subtitle" style="margin-top: 0.2rem;">Parámetros globales del sistema de variables fiscales y cambiarias.</p>
+                    </div>
+                </header>
+
+                <div class="content-body" style="max-width: 800px; margin: 0 auto; padding-top: 1rem;">
+                    <div class="card glassmorphism" style="padding: 2rem;">
+                        <h2 style="margin-bottom: 1.5rem; font-size: 1.2rem; display: flex; align-items: center; gap: 0.5rem; color: var(--text-primary);">
+                            <i data-lucide="sliders"></i> Parámetros de Facturación
+                        </h2>
+                        
+                        <form id="globalSettingsForm">
+                            <div class="settings-group" style="margin-bottom: 2rem; padding: 1.5rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                                <h3 style="margin-bottom: 0.5rem; font-size: 1.05rem; color: var(--primary-accent);">1. Origen de Tasa de Emisión</h3>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                                    Define de dónde toma el sistema la Tasa BCV (Dólar oficial) al momento en que se emitió la factura original.
+                                </p>
+                                <div style="display: flex; flex-direction: column; gap: 0.8rem; color: var(--text-primary);">
+                                    <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer;">
+                                        <input type="radio" name="TasaEmisionSource" value="DOLARTODAY" required style="margin-top: 3px;">
+                                        <span><strong>Histórico Dolartoday:</strong> Busca la tasa oficial BCV correspondiente a la fecha de la factura en la base de datos de históricos automática.</span>
+                                    </label>
+                                    <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer;">
+                                        <input type="radio" name="TasaEmisionSource" value="SACOMP_FACTOR" style="margin-top: 3px;">
+                                        <span><strong>Factor Saint (SACOMP):</strong> Utiliza el campo numérico <code>Factor</code> guardado directamente en la tabla SACOMP de Saint al momento de registrar la compra.</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="settings-group" style="margin-bottom: 2rem; padding: 1.5rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                                <h3 style="margin-bottom: 0.5rem; font-size: 1.05rem; color: var(--primary-accent);">2. Origen del Equivalente en USD (Factura Original)</h3>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                                    Define cómo se determina la deuda original expresada en divisa extranjera.
+                                </p>
+                                <div style="display: flex; flex-direction: column; gap: 0.8rem; color: var(--text-primary);">
+                                    <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer;">
+                                        <input type="radio" name="MontoUSDSource" value="CALCULATED" required style="margin-top: 3px;">
+                                        <span><strong>Cálculo Automático:</strong> Divide el Monto Total de la factura (Bs) entre la Tasa de Emisión seleccionada arriba.</span>
+                                    </label>
+                                    <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer;">
+                                        <input type="radio" name="MontoUSDSource" value="SACOMP_MONOMEX" style="margin-top: 3px;">
+                                        <span><strong>Monto Extranjero Saint (SACOMP):</strong> Lee directamente el valor del campo extra <code>MontoMEx</code> registrado en la compra original de Saint.</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; justify-content: flex-end;">
+                                <button type="submit" class="btn btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem;">
+                                    <i data-lucide="save"></i> Guardar Configuración
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
 
         </main>
     </div>
@@ -2025,7 +2088,7 @@
 
     <datalist id="datalistProviders"></datalist>
 
-    <script src="script.js?v=6"></script>
+    <script src="script.js?v=9"></script>
     <script>
         lucide.createIcons();
     </script>

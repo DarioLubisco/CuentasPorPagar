@@ -1116,6 +1116,7 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
                 cxp.FechaE, cxp.FechaV AS FechaVSaint,
                 comp.FechaI, comp.Notas10,
                 comp.TGravable, cxp.MtoTax,
+                comp.Factor, comp.MontoMEx,
                 ISNULL(cond.DiasNoIndexacion, 0) AS DiasNoIndexacion,
                 ISNULL(cond.BaseDiasCredito, 'EMISION') AS BaseDiasCredito,
                 ISNULL(cond.DiasVencimiento, prov.diascred) AS DiasVencimiento,
@@ -1161,6 +1162,16 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
             
         columns = [column[0] for column in cursor.description]
         data = dict(zip(columns, row))
+
+        # Fetch Settings
+        cursor.execute("SELECT SettingKey, SettingValue FROM EnterpriseAdmin_AMC.Procurement.Settings")
+        settings = {srow[0]: srow[1] for srow in cursor.fetchall()}
+        tasa_source = settings.get('TasaEmisionSource', 'DOLARTODAY')
+        usd_source = settings.get('MontoUSDSource', 'CALCULATED')
+
+        # Override TasaEmision if configured to parse from Saint
+        if tasa_source == 'SACOMP_FACTOR' and data.get('Factor') and data['Factor'] > 0:
+            data['TasaEmision'] = float(data['Factor'])
         
         # Calculate dynamic dates
         from datetime import datetime, timedelta
@@ -1194,8 +1205,13 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
             elif isinstance(v, datetime): # type: ignore
                 data[k] = v.strftime('%Y-%m-%d')
                 
-        # Compute specific fields
-        monto_original_usd = data['Monto'] / data['TasaEmision'] if data['TasaEmision'] else 0
+        # Compute specific fields based on settings
+        monto_original_usd = 0
+        if usd_source == 'SACOMP_MONOMEX' and data.get('MontoMEx') and data['MontoMEx'] > 0:
+            monto_original_usd = float(data['MontoMEx'])
+        else:
+            monto_original_usd = data['Monto'] / data['TasaEmision'] if data['TasaEmision'] else 0
+            
         saldo_usd = monto_original_usd - data['TotalUsdAbonado']
         data['MontoOriginalUSD'] = round(monto_original_usd, 2)
         data['SaldoRestanteUSD'] = round(saldo_usd, 2)
@@ -1366,27 +1382,43 @@ async def register_debit_note(payload: DebitNoteRegisterRequest):
         if 'conn' in locals(): conn.close()
 
 @app.get("/api/exchange-rate")
-async def get_exchange_rate(fecha: str = Query(...)):
+async def get_exchange_rate(fecha: str = None):
     try:
+        logging.info(f"API: get_exchange_rate requested for fecha={fecha}")
         conn = database.get_db_connection()
         cursor = conn.cursor()
-        query = """
-            SELECT TOP 1 dolarbcv 
-            FROM EnterpriseAdmin_AMC.dbo.dolartoday 
-            WHERE CAST(fecha AS DATE) <= CAST(? AS DATE)
-            ORDER BY fecha DESC
-        """
-        cursor.execute(query, (fecha,))
+        if fecha:
+            # Use a safer comparison: strictly before the next day
+            query = """
+                SELECT TOP 1 dolarbcv 
+                FROM EnterpriseAdmin_AMC.dbo.dolartoday 
+                WHERE fecha < DATEADD(day, 1, CAST(? AS DATE))
+                AND dolarbcv IS NOT NULL
+                ORDER BY fecha DESC
+            """
+            cursor.execute(query, (fecha,))
+        else:
+            query = """
+                SELECT TOP 1 dolarbcv 
+                FROM EnterpriseAdmin_AMC.dbo.dolartoday 
+                WHERE dolarbcv IS NOT NULL
+                ORDER BY fecha DESC
+            """
+            cursor.execute(query)
+            
         row = cursor.fetchone()
         if not row:
+            logging.warning(f"API: No rate found for fecha={fecha}")
             return {"rate": None}
-        return {"rate": float(row[0])}
+            
+        rate = float(row[0])
+        logging.info(f"API: Returning rate={rate} for fecha={fecha}")
+        return {"rate": rate}
     except Exception as e:
         logging.error(f"Error fetching exchange rate: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        if 'conn' in locals():
-            conn.close()
+        if 'conn' in locals(): conn.close()
 
 @app.get("/api/reports/aging")
 async def report_aging():
@@ -1525,19 +1557,6 @@ async def report_cashflow(desde: str = None, hasta: str = None):
         if 'conn' in locals(): conn.close()
 
 
-@app.get("/api/exchange-rate")
-async def get_exchange_rate():
-    try:
-        conn = database.get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT TOP 1 dolarbcv FROM EnterpriseAdmin_AMC.dolartoday ORDER BY Fecha DESC")
-        row = cursor.fetchone()
-        rate = row[0] if row else 0
-        return {"rate": rate}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        if 'conn' in locals(): conn.close()
 
 @app.get("/api/reports/dpo")
 async def report_dpo():
@@ -2971,6 +2990,45 @@ async def delete_credit_note(id_nc: int):
     except Exception as e:
         if 'conn' in locals(): conn.rollback()
         logging.error(f"Error deleting credit note: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.get("/api/procurement/settings")
+async def get_settings():
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT SettingKey, SettingValue FROM EnterpriseAdmin_AMC.Procurement.Settings")
+        settings = {row.SettingKey: row.SettingValue for row in cursor.fetchall()}
+        return settings
+    except Exception as e:
+        logging.error(f"Error fetching settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.post("/api/procurement/settings")
+async def update_settings(payload: dict):
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        for key, value in payload.items():
+            cursor.execute("""
+                UPDATE EnterpriseAdmin_AMC.Procurement.Settings 
+                SET SettingValue = ?, UpdatedAt = GETDATE()
+                WHERE SettingKey = ?
+            """, (str(value), str(key)))
+            if cursor.rowcount == 0:
+                cursor.execute("""
+                    INSERT INTO EnterpriseAdmin_AMC.Procurement.Settings (SettingKey, SettingValue)
+                    VALUES (?, ?)
+                """, (str(key), str(value)))
+        conn.commit()
+        return {"message": "Configuración guardada exitosamente"}
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        logging.error(f"Error updating settings: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if 'conn' in locals(): conn.close()
