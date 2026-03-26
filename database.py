@@ -21,4 +21,6 @@ def get_db_connection():
         f"UID={DB_USERNAME};"
         f"PWD={DB_PASSWORD}"
     )
-    return pyodbc.connect(conn_str)
+    conn = pyodbc.connect(conn_str)
+    conn.timeout = 30 # Prevent Lock request timeouts
+    return conn

@@ -113,6 +113,9 @@ class DebitNoteRegisterRequest(BaseModel):
     Invoices: List[InvoiceReference]
     NotaDebitoID: str
 
+class SettingsBulkRequest(BaseModel):
+    settings: dict
+
 class AbonoRequest(BaseModel):
     NumeroD: str
     CodProv: str
@@ -122,6 +125,55 @@ class AbonoRequest(BaseModel):
     MontoUsdAbonado: float
     AplicaIndexacion: bool
     Referencia: Optional[str] = ""
+
+@app.get("/api/settings")
+async def get_settings():
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        # Ensure Settings table exists
+        cursor.execute("""
+        IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[Procurement].[Settings]') AND type in (N'U'))
+        BEGIN
+            CREATE TABLE [Procurement].[Settings] (
+                [SettingKey] VARCHAR(50) PRIMARY KEY,
+                [SettingValue] VARCHAR(255),
+                [CodSucu] VARCHAR(10) DEFAULT '00000'
+            );
+        END
+        """)
+        
+        cursor.execute("SELECT SettingKey, SettingValue FROM EnterpriseAdmin_AMC.Procurement.Settings WITH (NOLOCK) WHERE CodSucu = '00000'")
+        results = {row[0]: row[1] for row in cursor.fetchall()}
+        return results
+    except Exception as e:
+        logging.error(f"Error fetching settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.post("/api/settings/bulk")
+async def update_settings_bulk(payload: SettingsBulkRequest):
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        for key, value in payload.settings.items():
+            cursor.execute("SELECT 1 FROM EnterpriseAdmin_AMC.Procurement.Settings WHERE SettingKey = ? AND CodSucu = '00000'", (key,))
+            if cursor.fetchone():
+                cursor.execute("UPDATE EnterpriseAdmin_AMC.Procurement.Settings SET SettingValue = ? WHERE SettingKey = ? AND CodSucu = '00000'", (str(value), key))
+            else:
+                cursor.execute("INSERT INTO EnterpriseAdmin_AMC.Procurement.Settings (SettingKey, SettingValue, CodSucu) VALUES (?, ?, '00000')", (key, str(value)))
+                
+        conn.commit()
+        return {"message": "Settings updated successfully"}
+    except Exception as e:
+        logging.error(f"Error updating settings: {e}", exc_info=True)
+        if 'conn' in locals(): conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
 
 @app.post("/api/plan-pagos")
 async def planificar_pagos(payload: PlanPagoRequest):
@@ -194,6 +246,12 @@ async def get_cuentas_por_pagar(search: str = Query("", description="Search term
         conn = database.get_db_connection()
         cursor = conn.cursor()
         
+        # Load Limit from settings
+        cursor.execute("SELECT SettingValue FROM EnterpriseAdmin_AMC.Procurement.Settings WITH (NOLOCK) WHERE SettingKey = 'LimiteCarga'")
+        row = cursor.fetchone()
+        limit_val = int(row.SettingValue) if row and row.SettingValue and str(row.SettingValue).isdigit() else 500
+        top_clause = f"TOP {limit_val}" if limit_val > 0 else "TOP 500"
+
         date_filter = ""
         date_params = []
         if desde:
@@ -218,7 +276,7 @@ async def get_cuentas_por_pagar(search: str = Query("", description="Search term
         
         # Build query
         query = f"""
-            SELECT
+            SELECT {top_clause}
               SACOMP.FechaI,
               SACOMP.FechaE,
               SACOMP.FechaV,
@@ -228,7 +286,7 @@ async def get_cuentas_por_pagar(search: str = Query("", description="Search term
               SAACXP.Monto,
               SAACXP.CodOper,
               SAACXP.MontoNeto,
-              SAACXP.Saldo,
+              (ISNULL(SACOMP.MtoTotal, SAACXP.Monto) - ISNULL(SACOMP.Contado, 0) - ISNULL(SACOMP.MtoPagos, 0)) AS Saldo,
               SAACXP.MtoTax,
               SACOMP.MtoPagos,
               SACOMP.SaldoAct AS SaldoAct_SACOMP,
@@ -676,6 +734,7 @@ async def registrar_abonos_batch(
             with open(filepath, "wb") as buffer:
                 shutil.copyfileobj(archivo.file, buffer)
         
+        # cursor.execute("BEGIN TRANSACTION;") # Rely on pyodbc autocommit=False default
         for p in pagos:
             aplica_idx = 1 if p.get('AplicaIndexacion') in [True, 'true', 'True', 1] else 0
             
@@ -696,6 +755,14 @@ async def registrar_abonos_batch(
                 p.get('Referencia', ''), filepath, 1 if NotificarCorreo else 0,
                 tasa_orig, mto_orig
             ))
+            
+            # Update SACOMP.MtoPagos and SAACXP.Saldo for consistency
+            monto_abono = float(p.get('MontoBsAbonado', 0))
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET MtoPagos = ISNULL(MtoPagos, 0) + ? WHERE NumeroD = ? AND CodProv = ?", (monto_abono, p['NumeroD'], p['CodProv']))
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET Saldo = Saldo - ? WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (monto_abono, p['NumeroD'], p['CodProv']))
+            
+            # Also update SAPROV.Saldo (Provider global balance tracking)
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAPROV SET Saldo = Saldo - ? WHERE CodProv = ?", (monto_abono, p['CodProv']))
         
         # Phase 5: Excess payment as Credit Note
         total_abonos = sum(float(p.get('MontoBsAbonado', 0)) for p in pagos)
@@ -724,6 +791,38 @@ async def registrar_abonos_batch(
                 f"Excedente de pago lote ({len(pagos)} facturas)",
                 tasa_orig, mto_orig
             ))
+
+        
+        # Phase 11: Auto-generate Debit Note for Indexation Discrepancies
+        for p in pagos:
+            if p.get('AplicaIndexacion') in [True, 'true', 'True', 1]:
+                cursor.execute("SELECT Monto FROM EnterpriseAdmin_AMC.dbo.SAACXP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (p['NumeroD'], p['CodProv']))
+                saacxp_row = cursor.fetchone()
+                if saacxp_row:
+                    orig_bs = float(saacxp_row[0])
+                    cursor.execute("SELECT SUM(MontoBsAbonado) FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos WITH (NOLOCK) WHERE NumeroD = ? AND CodProv = ?", (p['NumeroD'], p['CodProv']))
+                    total_paid_bs = cursor.fetchone()[0] or 0
+                    
+                    discrepancia = float(total_paid_bs) - orig_bs
+                    if discrepancia > 0.1: # Threshold to avoid cents noise
+                        # Check existance to avoid duplicates
+                        cursor.execute("SELECT COUNT(*) FROM EnterpriseAdmin_AMC.Procurement.DebitNotesTracking WHERE NumeroD = ? AND CodProv = ? AND Motivo = 'INDEXACION' AND Estatus = 'PENDIENTE'", (p['NumeroD'], p['CodProv']))
+                        if cursor.fetchone()[0] == 0:
+                            tasa_pago = float(p.get('TasaCambioDiaAbono', 0))
+                            cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCom = 'H'", (p['NumeroD'],))
+                            scomp = cursor.fetchone()
+                            t_orig = float(scomp[0]) if scomp and scomp[0] else None
+                            m_orig = float(scomp[1]) if scomp and scomp[1] else None
+                            
+                            cursor.execute("""
+                                INSERT INTO EnterpriseAdmin_AMC.Procurement.DebitNotesTracking 
+                                (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Estatus, Observacion, TasaCambioOrig, MontoMExOrig)
+                                VALUES (?, ?, 'INDEXACION', ?, ?, ?, 'PENDIENTE', ?, ?, ?)
+                            """, (
+                                p['CodProv'], p['NumeroD'], discrepancia, tasa_pago,
+                                discrepancia / tasa_pago if tasa_pago > 0 else 0,
+                                f"Auto-generado por indexación (Lote)", t_orig, m_orig
+                            ))
 
         conn.commit()
         
@@ -762,8 +861,9 @@ async def registrar_abonos_batch(
     except Exception as e:
         logging.error(f"Error batch abonos: {e}", exc_info=True)
         if 'conn' in locals():
+            # cursor.execute("IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;") # No longer needed with pyodbc autocommit=False
             conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Fallo en la base de datos al procesar el lote de pagos. Transacción revertida completamente.")
     finally:
         if 'conn' in locals():
             conn.close()
@@ -816,6 +916,11 @@ async def registrar_abono(
             MontoUsdAbonado, aplica_idx, Referencia,
             filepath, notificar, tasa_orig, mto_orig
         ))
+        
+        # Update SACOMP.MtoPagos and SAACXP.Saldo for consistency
+        cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET MtoPagos = ISNULL(MtoPagos, 0) + ? WHERE NumeroD = ? AND CodProv = ?", (MontoBsAbonado, NumeroD, CodProv))
+        cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET Saldo = Saldo - ? WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (MontoBsAbonado, NumeroD, CodProv))
+        cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAPROV SET Saldo = Saldo - ? WHERE CodProv = ?", (MontoBsAbonado, CodProv))
 
         # Enviar correo si corresponde (notificar o force_send)
         if notificar == 1 or force == 1:
@@ -856,6 +961,29 @@ async def registrar_abono(
                 'PENDIENTE',
                 f"Excedente de pago factura {NumeroD}"
             ))
+
+        # Phase 11: Auto-generate Debit Note for Indexation Discrepancies
+        if aplica_idx == 1:
+            cursor.execute("SELECT Monto FROM EnterpriseAdmin_AMC.dbo.SAACXP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (NumeroD, CodProv))
+            saacxp_row = cursor.fetchone()
+            if saacxp_row:
+                orig_bs = float(saacxp_row[0])
+                cursor.execute("SELECT SUM(MontoBsAbonado) FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos WITH (NOLOCK) WHERE NumeroD = ? AND CodProv = ?", (NumeroD, CodProv))
+                total_paid_bs = cursor.fetchone()[0] or 0
+                
+                discrepancia = float(total_paid_bs) - orig_bs
+                if discrepancia > 0.1:
+                    cursor.execute("SELECT COUNT(*) FROM EnterpriseAdmin_AMC.Procurement.DebitNotesTracking WHERE NumeroD = ? AND CodProv = ? AND Motivo = 'INDEXACION' AND Estatus = 'PENDIENTE'", (NumeroD, CodProv))
+                    if cursor.fetchone()[0] == 0:
+                        cursor.execute("""
+                            INSERT INTO EnterpriseAdmin_AMC.Procurement.DebitNotesTracking 
+                            (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Estatus, Observacion, TasaCambioOrig, MontoMExOrig)
+                            VALUES (?, ?, 'INDEXACION', ?, ?, ?, 'PENDIENTE', ?, ?, ?)
+                        """, (
+                            CodProv, NumeroD, discrepancia, TasaCambioDiaAbono,
+                            discrepancia / TasaCambioDiaAbono if TasaCambioDiaAbono > 0 else 0,
+                            f"Auto-generado por indexación ({FechaAbono})", tasa_orig, mto_orig
+                        ))
 
         conn.commit()
         return {"message": "Abono registrado exitosamente.", "email_sent": (notificar == 1 or force == 1)}
@@ -1063,6 +1191,19 @@ async def editar_factura(numeroD: str, cod_prov: str = Query(default=''), payloa
         if "TGravable" in payload and payload["TGravable"] is not None:
             comp_fields.append("TGravable = ?")
             comp_params.append(float(payload["TGravable"]))
+
+        if "IVA" in payload and payload["IVA"] is not None:
+            iva_val = float(payload["IVA"])
+            comp_fields.append("MtoTax = ?")
+            comp_params.append(iva_val)
+            # Update SAACXP.MtoTax too
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET MtoTax = ? WHERE NumeroD = ? AND TipoCxP = '10'", (iva_val, numeroD))
+        elif "MtoTax" in payload and payload["MtoTax"] is not None:
+            # Also handle if sent as MtoTax
+            iva_val = float(payload["MtoTax"])
+            comp_fields.append("MtoTax = ?")
+            comp_params.append(iva_val)
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET MtoTax = ? WHERE NumeroD = ? AND TipoCxP = '10'", (iva_val, numeroD))
 
         if comp_fields:
             set_clause = ", ".join(comp_fields)
@@ -2278,13 +2419,15 @@ async def crear_retencion(payload: dict = Body(...)):
                 tasa_orig = float(sacomp_row[0]) if sacomp_row and sacomp_row[0] else None
                 mto_orig = float(sacomp_row[1]) if sacomp_row and sacomp_row[1] else None
 
+                monto_usd_abonado = round(monto_retenido / tasa_orig, 2) if tasa_orig and tasa_orig > 0 else 0
+
                 cursor.execute("""
                     INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
                     (NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, TipoAbono, TasaCambioOrig, MontoMExOrig)
-                    VALUES (?, ?, ?, ?, 0, 0, 0, ?, 'RETENCION_IVA', ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'RETENCION_IVA', ?, ?)
                 """, (
                     f["NumeroD"], f["CodProv"], fecha_retencion,
-                    monto_retenido,
+                    monto_retenido, tasa_orig or 0, monto_usd_abonado,
                     f"Retención IVA Comp. {nro_comprobante}",
                     tasa_orig, mto_orig
                 ))
@@ -2356,25 +2499,36 @@ def generar_pdf_retencion(config: dict, retenciones: list) -> bytes:
     pdf.cell(0, 10, 'COMPROBANTE DE RETENCIÓN DEL IVA', 0, 1, 'C', fill=True)
     pdf.ln(3)
     
-    # --- Agente info ---
-    pdf.set_font('Helvetica', 'B', 9)
-    pdf.set_text_color(0, 0, 0)
-
+    # --- Agente info (Explicit Layout to prevent wrapping issues) ---
     nro_comprobante = retenciones[0]["NumeroComprobante"] if retenciones else "N/A"
     fecha_ret = str(retenciones[0].get("FechaRetencion", ""))[:10] if retenciones else "N/A"
 
-    info_labels = [
-        ("Agente de Retención:", config.get("RazonSocial_Agente", "")),
-        ("RIF:", config.get("RIF_Agente", "")),
-        ("Dirección Fiscal:", config.get("DireccionFiscal_Agente", "")),
-        ("Nro. Comprobante:", nro_comprobante),
-        ("Fecha de Retención:", fecha_ret),
-    ]
-    for label, value in info_labels:
-        pdf.set_font('Helvetica', 'B', 9)
-        pdf.cell(45, 6, label, 0, 0)
-        pdf.set_font('Helvetica', '', 9)
-        pdf.cell(0, 6, str(value), 0, 1)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "Agente de Retención:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.cell(0, 6, str(config.get("RazonSocial_Agente", "")), 0, 1)
+
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "RIF:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.cell(0, 6, str(config.get("RIF_Agente", "")), 0, 1)
+
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "Dirección Fiscal:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    # Using fixed width for multi_cell to guarantee clean line wrap for subsequent labels
+    pdf.multi_cell(0, 6, str(config.get("DireccionFiscal_Agente", "")), 0, 'L')
+    
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "Nro. Comprobante:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.cell(0, 6, str(nro_comprobante), 0, 1)
+
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "Fecha de Retención:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.cell(0, 6, str(fecha_ret), 0, 1)
     
     pdf.ln(3)
     
@@ -2391,13 +2545,15 @@ def generar_pdf_retencion(config: dict, retenciones: list) -> bytes:
     pdf.ln(5)
     
     # --- Table Header ---
+    # Adjusted widths to fit NEW column "Sin Derecho" (Compressed portrait layout)
     cols = [
-        ("Factura", 25), ("Nro Control", 25), ("Fecha Factura", 22),
-        ("Monto Total", 25), ("Base Imponible", 25), ("IVA %", 12),
-        ("IVA Causado", 22), ("Ret. %", 12), ("Monto Retenido", 25)
+        ("Factura", 18), ("Nro Control", 20), ("Fecha Factura", 16),
+        ("Monto Total", 20), ("Sin Derecho", 20), ("Base Imponible", 20), 
+        ("IVA %", 8), ("IVA Causado", 20), ("Ret. %", 8), ("Monto Retenido", 20)
     ]
+    total_table_width = sum(w for n, w in cols) # ~170mm
     
-    pdf.set_font('Helvetica', 'B', 7)
+    pdf.set_font('Helvetica', 'B', 6) # Slightly smaller font for more columns
     pdf.set_fill_color(*header_bg)
     pdf.set_text_color(*header_fg)
     for name, width in cols:
@@ -2409,6 +2565,7 @@ def generar_pdf_retencion(config: dict, retenciones: list) -> bytes:
     pdf.set_font('Helvetica', '', 7)
     
     total_monto = 0
+    total_exento = 0
     total_base = 0
     total_iva = 0
     total_retenido = 0
@@ -2421,6 +2578,7 @@ def generar_pdf_retencion(config: dict, retenciones: list) -> bytes:
             fill = False
             
         monto = float(r.get("MontoTotal", 0))
+        exento = float(r.get("MontoExento", 0))
         base = float(r.get("BaseImponible", 0))
         alicuota = float(r.get("Alicuota", 0))
         iva = float(r.get("IVACausado", base * alicuota / 100))
@@ -2428,6 +2586,7 @@ def generar_pdf_retencion(config: dict, retenciones: list) -> bytes:
         retenido = float(r.get("MontoRetenido", 0))
         
         total_monto += monto
+        total_exento += exento
         total_base += base
         total_iva += iva
         total_retenido += retenido
@@ -2439,6 +2598,7 @@ def generar_pdf_retencion(config: dict, retenciones: list) -> bytes:
             str(r.get("NroControl", "")),
             fecha_fact,
             f"{monto:,.2f}",
+            f"{exento:,.2f}",
             f"{base:,.2f}",
             f"{alicuota:.0f}%",
             f"{iva:,.2f}",
@@ -2451,18 +2611,19 @@ def generar_pdf_retencion(config: dict, retenciones: list) -> bytes:
         pdf.ln()
     
     # --- Totals ---
-    pdf.set_font('Helvetica', 'B', 7)
+    pdf.set_font('Helvetica', 'B', 6)
     pdf.set_fill_color(220, 220, 220)
     
     # Empty cells for first 3 columns
-    total_width = cols[0][1] + cols[1][1] + cols[2][1]
-    pdf.cell(total_width, 7, 'TOTALES:', 1, 0, 'R', fill=True)
+    prep_width = cols[0][1] + cols[1][1] + cols[2][1]
+    pdf.cell(prep_width, 7, 'TOTALES:', 1, 0, 'R', fill=True)
     pdf.cell(cols[3][1], 7, f"{total_monto:,.2f}", 1, 0, 'R', fill=True)
-    pdf.cell(cols[4][1], 7, f"{total_base:,.2f}", 1, 0, 'R', fill=True)
-    pdf.cell(cols[5][1], 7, "", 1, 0, 'C', fill=True)
-    pdf.cell(cols[6][1], 7, f"{total_iva:,.2f}", 1, 0, 'R', fill=True)
-    pdf.cell(cols[7][1], 7, "", 1, 0, 'C', fill=True)
-    pdf.cell(cols[8][1], 7, f"{total_retenido:,.2f}", 1, 0, 'R', fill=True)
+    pdf.cell(cols[4][1], 7, f"{total_exento:,.2f}", 1, 0, 'R', fill=True) 
+    pdf.cell(cols[5][1], 7, f"{total_base:,.2f}", 1, 0, 'R', fill=True)
+    pdf.cell(cols[6][1], 7, "", 1, 0, 'C', fill=True)
+    pdf.cell(cols[7][1], 7, f"{total_iva:,.2f}", 1, 0, 'R', fill=True)
+    pdf.cell(cols[8][1], 7, "", 1, 0, 'C', fill=True)
+    pdf.cell(cols[9][1], 7, f"{total_retenido:,.2f}", 1, 0, 'R', fill=True)
     pdf.ln(12)
     
     # --- Footer ---
@@ -2503,7 +2664,7 @@ async def get_retencion_pdf(id_ret: int):
             SELECT r.*, p.Descrip as ProveedorNombre
             FROM EnterpriseAdmin_AMC.Procurement.Retenciones_IVA r
             LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV p ON r.CodProv = p.CodProv
-            WHERE r.NumeroComprobante = ?
+            WHERE r.NumeroComprobante = ? AND r.Estado <> 'ANULADO'
             ORDER BY r.Id
         """, (main_ret["NumeroComprobante"],))
         all_rows = cursor.fetchall()

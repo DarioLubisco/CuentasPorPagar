@@ -67,6 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (settingsForm) {
                     const TasaEmisionSourceStr = window.globalRetConfig['TasaEmisionSource'] || 'DOLARTODAY';
                     const MontoUSDSourceStr = window.globalRetConfig['MontoUSDSource'] || 'CALCULATED';
+                    const LimiteCargaStr = window.globalRetConfig['LimiteCarga'] || '';
                     
                     const tasaRadios = settingsForm.elements['TasaEmisionSource'];
                     if (tasaRadios) {
@@ -80,6 +81,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             if (r.value === MontoUSDSourceStr) r.checked = true;
                         }
                     }
+                    const limiteInput = document.getElementById('settingsLimiteCarga');
+                    if(limiteInput && LimiteCargaStr) limiteInput.value = LimiteCargaStr;
                 }
             }
         })
@@ -2208,6 +2211,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const abTasaLoader = document.getElementById('abTasaLoader');
 
     let currentCxpStatus = null;
+    let lastAutoFilledBs = '';
 
     window.openAbonosPanel = async (codProv, numeroD) => {
         abonosModal.classList.add('active');
@@ -2235,6 +2239,7 @@ document.addEventListener('DOMContentLoaded', () => {
         abMontoUsd.value = '';
         abTasa.value = '';
         abAplicaIndex.checked = false;
+        lastAutoFilledBs = '';
 
         abMontoOrigBs.textContent = 'Cargando...';
         abMontoOrigUsd.textContent = '...';
@@ -2359,6 +2364,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Auto-check indexation based on FechaPago vs FechaNI
         checkIndexationStatus();
+
+        // Phase 13/14 Fix: Ensure the payment amount is suggested on open
+        // Reset lastAutoFilledBs to ensure the new invoice gets a fresh calculation
+        lastAutoFilledBs = "";
+        fillDefaultPaymentAmount(true);
     };
 
     const updateExchangeRate = async () => {
@@ -2393,14 +2403,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const dynamicInvoiceStatusModal = document.getElementById('dynamicInvoiceStatusModal');
     window.closeDynamicInvoiceStatusModal = () => dynamicInvoiceStatusModal?.classList.remove('active');
 
+    // Utility for strict financial rounding to avoid floating point cent errors
+    const roundFixed = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
+
     document.getElementById('btnDynamicInvoiceStatus')?.addEventListener('click', () => {
         if (!currentCxpStatus) {
             console.warn("Calculadora clickeada pero currentCxpStatus es null. Asegúrese de que los datos de la factura hayan cargado.");
             return;
         }
         const d = currentCxpStatus;
-        const currentTasa = parseFloat(abTasa.value) || 0;
-        if (!currentTasa) {
+        const tasaDia = parseFloat(abTasa.value) || 0;
+        if (!tasaDia) {
             showToast('Por favor espere a que cargue la Tasa BCV.', 'warning');
             return;
         }
@@ -2418,26 +2431,43 @@ document.addEventListener('DOMContentLoaded', () => {
         let d1Usd = (d.Descto1 || 0) / historicalTasa;
         let d2Usd = (d.Descto2 || 0) / historicalTasa;
         
-        let tGravableUsd = (d.TGravable || 0) / historicalTasa;
-        let ivaUsd = (d.MtoTax || 0) / historicalTasa;
-        let exentoUsd = Math.max(0, mtoTotalUsd - tGravableUsd - ivaUsd);
+        const aplicaIndex = abAplicaIndex?.checked || false;
+        const currentTasa = aplicaIndex ? (parseFloat(abTasa.value) || historicalTasa) : historicalTasa;
 
-        // Recalculate in BS with current Tasa
-        const newBaseBs = tGravableUsd * currentTasa;
-        const newIvaBs = ivaUsd * currentTasa;
-        const newExentoBs = exentoUsd * currentTasa;
-        const newMtoBs = mtoTotalUsd * currentTasa;
+        // Phase 20: Pre-round USD values to exactly 2 decimals to match provider math.
+        let tGravableUsd = roundFixed((parseFloat(d.TGravable) || 0) / historicalTasa);
+        let exentoOrigBs = Math.max(0, (parseFloat(d.Monto) || 0) - (parseFloat(d.TGravable) || 0) - (parseFloat(d.MtoTax) || 0));
+        let exentoUsd = roundFixed(exentoOrigBs / historicalTasa);
 
-        // Phase 8.6: Detailed Total Breakdown
-        console.log("CXP Data for calculator:", d);
+        let newBaseBs = 0, newIvaBs = 0, newExentoBs = 0, newMtoBs = 0;
+
+        if (aplicaIndex) {
+            // Phase 20: Built from grounded 2-decimal USD components
+            newBaseBs = roundFixed(tGravableUsd * currentTasa);
+            newIvaBs = roundFixed(newBaseBs * 0.16);
+            newExentoBs = roundFixed(exentoUsd * currentTasa);
+            newMtoBs = roundFixed(newBaseBs + newIvaBs + newExentoBs);
+        } else {
+            // Phase 13: STRICT original BS values from DB
+            newBaseBs = roundFixed(parseFloat(d.TGravable) || 0);
+            newIvaBs = roundFixed(parseFloat(d.MtoTax) || 0);
+            newExentoBs = roundFixed(exentoOrigBs);
+            newMtoBs = roundFixed(newBaseBs + newIvaBs + newExentoBs);
+        }
+
         const isReten = d.EsReten == 1 || d.EsReten === true || String(d.EsReten) === '1';
         let porctRet = parseFloat(d.PorctRet) || 0;
         if (isReten && porctRet === 0) porctRet = 75; 
-        console.log(`Retention Rule: isReten=${isReten}, dbPorct=${d.PorctRet}, usedPorct=${porctRet}%`);
         
-        const newRetencionBs = newIvaBs * (porctRet / 100.0);
-        const newRestanteBs = newMtoBs - newRetencionBs;
-
+        const newRetencionBs = isReten ? roundFixed(newIvaBs * (porctRet / 100.0)) : 0;
+        const newIvaAPagarBs = roundFixed(newIvaBs - newRetencionBs);
+        // Phase 20: newTotalBs correctly references newMtoBs (which considers indexation)
+        const newTotalBs = roundFixed(newMtoBs - (parseFloat(d.TotalBsAbonado) || 0));
+        const newRestanteBs = roundFixed(newTotalBs - newRetencionBs);
+        
+        ivaUsd = (newIvaBs / currentTasa);
+        
+        // UI Updates
         document.getElementById('dynTasaBcv').textContent = formatBs(currentTasa);
         document.getElementById('dynSubtotalUsd').textContent = usdFormatter(subtotalUsd);
         document.getElementById('dynMtoTotalUsd').textContent = usdFormatter(mtoTotalUsd);
@@ -2450,13 +2480,17 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('dynDesctoFletesBox').innerHTML = desctoFletesHtml;
 
         document.getElementById('dynBaseBs').textContent = formatBs(newBaseBs);
-        document.getElementById('dynIvaUsd').textContent = usdFormatter(ivaUsd);
+        document.getElementById('dynIvaUsd').textContent = usdFormatter(aplicaIndex ? ivaUsd : roundFixed(newIvaBs / currentTasa));
+        
+        // New IVA breakdown layout
         document.getElementById('dynIvaBs').textContent = formatBs(newIvaBs);
+        if(document.getElementById('dynIvaAPagar')) document.getElementById('dynIvaAPagar').textContent = formatBs(newIvaAPagarBs);
+        if(document.getElementById('dynIvaRetenido')) document.getElementById('dynIvaRetenido').textContent = formatBs(newRetencionBs);
+
         document.getElementById('dynExentoBs').textContent = formatBs(newExentoBs);
         
-        document.getElementById('dynRetencionBs').textContent = formatBs(newRetencionBs);
+        // Final total payable
         document.getElementById('dynRestanteBs').textContent = formatBs(newRestanteBs);
-        document.getElementById('dynMtoTotalBs').textContent = formatBs(newMtoBs);
 
         dynamicInvoiceStatusModal?.classList.add('active');
         lucide.createIcons();
@@ -2473,28 +2507,67 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // If payment date is STRICTLY greater than NI date, Indexation applies by default
         abAplicaIndex.checked = pagoDate > niDate;
+        
+        fillDefaultPaymentAmount(false); 
         calculateUsdAmount();
     };
 
-    const fillDefaultPaymentAmount = () => {
+    const fillDefaultPaymentAmount = (forceUserToggle = false) => {
         if (!currentCxpStatus) return;
         
-        // No sobreescribir si el usuario ya escribió un monto
-        if (abMontoBs.value && parseFloat(abMontoBs.value) > 0) {
-            return;
+        const d = currentCxpStatus;
+        const aplicaIndexacion = abAplicaIndex.checked;
+        const tasaActual = parseFloat(abTasa.value) || 0;
+        const historicalTasa = parseFloat(d.TasaEmision) || 1;
+        const tasa = (aplicaIndexacion && tasaActual > 0) ? tasaActual : historicalTasa;
+
+        let baseBs = 0, ivaBs = 0, exentoBs = 0, newMtoBs = 0;
+
+        // Phase 20: Pre-round USD values exactly the same way
+        let tGravableUsd = roundFixed((parseFloat(d.TGravable) || 0) / historicalTasa);
+        let exentoOrigBs = Math.max(0, (parseFloat(d.Monto) || 0) - (parseFloat(d.TGravable) || 0) - (parseFloat(d.MtoTax) || 0));
+        let exentoUsd = roundFixed(exentoOrigBs / historicalTasa);
+
+        if (aplicaIndexacion) {
+            baseBs = roundFixed(tGravableUsd * tasa);
+            ivaBs = roundFixed(baseBs * 0.16);
+            exentoBs = roundFixed(exentoUsd * tasa);
+            newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
+        } else {
+            // Phase 13: STRICT original BS values from DB
+            baseBs = roundFixed(parseFloat(d.TGravable) || 0);
+            ivaBs = roundFixed(parseFloat(d.MtoTax) || 0);
+            newMtoBs = roundFixed(parseFloat(d.Monto) || 0);
+        }
+        
+        const isReten = String(d.EsReten) === '1' || d.EsReten === true;
+        let retencionBs = 0;
+        if (isReten) {
+            let porctRet = parseFloat(d.PorctRet) || 0;
+            if (porctRet === 0) porctRet = 75;
+            retencionBs = roundFixed(ivaBs * (porctRet / 100.0));
         }
 
-        if (abAplicaIndex.checked) {
-            const rate = parseFloat(abTasa.value) || 0;
-            if (rate > 0 && currentCxpStatus.SaldoRestanteUSD > 0) {
-                // Indexado: Completar Saldo en USD al cambio actual
-                abMontoBs.value = (currentCxpStatus.SaldoRestanteUSD * rate).toFixed(2);
+        // Base Target Amount (Gross Remaining Saldo)
+        let saldoTargetBs = roundFixed(newMtoBs - (parseFloat(d.TotalBsAbonado) || 0));
+
+        // Suggested final amount subtracts un-emitted retentions from the active saldo
+        let finalBs = roundFixed(saldoTargetBs - retencionBs);
+        if (finalBs < 0) finalBs = 0;
+        
+        let targetBs = finalBs.toFixed(2);
+
+        const currentMonto = abMontoBs.value;
+        if (!forceUserToggle) {
+            // No sobreescribir si el usuario ya escribió un monto manual (diferente al auto-llenado previo)
+            if (currentMonto && parseFloat(currentMonto) > 0 && currentMonto !== lastAutoFilledBs) {
+                return;
             }
-        } else {
-            // No indexado: Completar Saldo original en Bs que quede en Saint
-            if (currentCxpStatus.Saldo !== undefined && currentCxpStatus.Saldo !== null) {
-                abMontoBs.value = currentCxpStatus.Saldo.toFixed(2);
-            }
+        }
+
+        if (targetBs) {
+            abMontoBs.value = targetBs;
+            lastAutoFilledBs = targetBs;
         }
     };
 
@@ -2519,7 +2592,7 @@ document.addEventListener('DOMContentLoaded', () => {
     abFechaPago?.addEventListener('change', updateExchangeRate);
     abMontoBs?.addEventListener('input', calculateUsdAmount);
     abAplicaIndex?.addEventListener('change', () => {
-        fillDefaultPaymentAmount();
+        fillDefaultPaymentAmount(true);
         calculateUsdAmount();
     });
 
@@ -2690,12 +2763,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('ieFechaE').value = (item.FechaE || '').split('T')[0];
         document.getElementById('ieFechaI').value = (item.FechaI || '').split('T')[0];
         document.getElementById('ieFechaV').value = (item.FechaV || '').split('T')[0];
-        document.getElementById('ieSaldoAct').value = item.Saldo || 0;
         // Notas10: '1' means indexed, anything else means not
         const n10 = item.Notas10;
         document.getElementById('ieNotas10').value = (n10 !== null && n10 !== undefined && String(n10).trim() === '1') ? '1' : '';
         document.getElementById('ieMontoFacturaBS').value = item.Monto || 0;
         document.getElementById('ieTGravable').value = item.TGravable || 0;
+        document.getElementById('ieIVA').value = item.MtoTax || 0;
         
         // Phase 8 additional fields
         document.getElementById('ieFactor').value = item.Factor || 0;
@@ -2721,7 +2794,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const ieMontoMEx = document.getElementById('ieMontoMEx');
     const ieMontoFacturaBS = document.getElementById('ieMontoFacturaBS');
     const ieContado = document.getElementById('ieContado');
-    const ieCredito = document.getElementById('ieCredito');
+    const ieTGravable = document.getElementById('ieTGravable');
+    const ieIVA = document.getElementById('ieIVA');
 
     const recalculateInvoice = (source) => {
         let factor = parseFloat(ieFactor.value) || 0;
@@ -2731,24 +2805,45 @@ document.addEventListener('DOMContentLoaded', () => {
         let credito = parseFloat(ieCredito.value) || 0;
 
         if (source === 'Factor' && factor > 0) {
-            ieMontoMEx.value = (mtoBs / factor).toFixed(2);
-        } else if (source === 'MontoMEx' && montoMEx > 0) {
-            ieFactor.value = (mtoBs / montoMEx).toFixed(4);
+            ieMontoMEx.value = (mtoBs / factor).toFixed(4);
+        } else if (source === 'MontoMEx' && factor > 0) {
+            ieMontoFacturaBS.value = (montoMEx * factor).toFixed(2);
+            ieCredito.value = ((montoMEx * factor) - contado).toFixed(2);
         } else if (source === 'MontoFacturaBS') {
-            if (factor > 0) ieMontoMEx.value = (mtoBs / factor).toFixed(2);
-            ieCredito.value = (mtoBs - contado).toFixed(2); // Credito absorbe la deferencia
+            if (factor > 0) ieMontoMEx.value = (mtoBs / factor).toFixed(4);
+            ieCredito.value = (mtoBs - contado).toFixed(2); 
         } else if (source === 'Contado') {
             ieCredito.value = (mtoBs - contado).toFixed(2);
         } else if (source === 'Credito') {
             ieContado.value = (mtoBs - credito).toFixed(2);
+        } else if (source === 'TGravable') {
+            const base = parseFloat(ieTGravable.value) || 0;
+            ieIVA.value = (base * 0.16).toFixed(2);
         }
     };
+
+    ieTGravable?.addEventListener('input', () => recalculateInvoice('TGravable'));
 
     ieFactor?.addEventListener('input', () => recalculateInvoice('Factor'));
     ieMontoMEx?.addEventListener('input', () => recalculateInvoice('MontoMEx'));
     ieMontoFacturaBS?.addEventListener('input', () => recalculateInvoice('MontoFacturaBS'));
     ieContado?.addEventListener('input', () => recalculateInvoice('Contado'));
     ieCredito?.addEventListener('input', () => recalculateInvoice('Credito'));
+
+    document.getElementById('ieFechaE')?.addEventListener('change', async (e) => {
+        const fecha = e.target.value;
+        if (!fecha) return;
+        try {
+            const res = await fetch(`/api/exchange-rate?fecha=${encodeURIComponent(fecha)}`);
+            if (res.ok) {
+                const json = await res.json();
+                if (json.rate) {
+                    ieFactor.value = json.rate.toFixed(4);
+                    recalculateInvoice('Factor'); 
+                }
+            }
+        } catch(err) { console.error('Error fetching rate for date:', err); }
+    });
 
     invoiceEditForm?.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -2761,10 +2856,10 @@ document.addEventListener('DOMContentLoaded', () => {
             FechaE: document.getElementById('ieFechaE').value || null,
             FechaI: document.getElementById('ieFechaI').value || null,
             FechaV: document.getElementById('ieFechaV').value || null,
-            SaldoAct: parseFloat(document.getElementById('ieSaldoAct').value) || 0,
             Notas10: document.getElementById('ieNotas10').value || "",
             MontoFacturaBS: parseFloat(document.getElementById('ieMontoFacturaBS').value) || 0,
             TGravable: parseFloat(document.getElementById('ieTGravable').value) || 0,
+            IVA: parseFloat(document.getElementById('ieIVA').value) || 0,
             Factor: parseFloat(document.getElementById('ieFactor').value) || 0,
             MontoMEx: parseFloat(document.getElementById('ieMontoMEx').value) || 0,
             TotalPrd: parseFloat(document.getElementById('ieTotalPrd').value) || 0,
@@ -3310,15 +3405,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const tbody = document.getElementById('genRetInvoicesTable');
             tbody.innerHTML = items.map((item, idx) => {
                 const monto = parseFloat(item.Monto) || 0;
-                const alicuota = 16;
+                // Base should correctly be TGravable, not the entire Monto
+                const base = parseFloat(item.TGravable) || 0;
+                let alicuota = 16;
+                if (base > 0 && item.MtoTax > 0) {
+                    const explicitAlicuota = (parseFloat(item.MtoTax) / base) * 100;
+                    if (Math.abs(explicitAlicuota - 16) > 0.1 && Math.abs(explicitAlicuota - 8) < 0.1) {
+                        alicuota = 8;
+                    }
+                }
+                
                 return `
                     <tr>
                         <td>${item.NumeroD}</td>
                         <td><input type="text" class="form-control ret-nrocontrol" value="${item.NroCtrol || ''}" style="width:100px;padding:0.3rem;font-size:0.8rem;"></td>
                         <td class="amount ret-monto">${monto.toFixed(2)}</td>
-                        <td><input type="number" class="form-control ret-base" value="${monto.toFixed(2)}" step="0.01" style="width:90px;padding:0.3rem;font-size:0.8rem;"></td>
+                        <td><input type="number" class="form-control ret-base" value="${base.toFixed(2)}" step="0.01" style="width:90px;padding:0.3rem;font-size:0.8rem;"></td>
                         <td><input type="number" class="form-control ret-alicuota" value="${alicuota}" step="0.01" style="width:55px;padding:0.3rem;font-size:0.8rem;"></td>
-                        <td class="amount ret-iva-display">${(monto * alicuota / 100).toFixed(2)}</td>
+                        <td class="amount ret-iva-display">${(base * alicuota / 100).toFixed(2)}</td>
                         <td class="amount ret-retenido-display" style="font-weight:bold;color:var(--warning);">0.00</td>
                     </tr>
                 `;
@@ -3368,7 +3472,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     NroControl: nroControl,
                     MontoTotal: monto,
                     BaseImponible: base,
-                    MontoExento: Math.max(0, monto - base),
+                    MontoExento: Math.max(0, roundFixed(monto - base - ivaCausado)),
                     Alicuota: alicuota,
                     IVACausado: ivaCausado,
                     PorcentajeRetencion: retenPct,
@@ -3412,10 +3516,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const formData = new FormData(settingsFormElement);
             const TasaEmisionSource = formData.get('TasaEmisionSource');
             const MontoUSDSource = formData.get('MontoUSDSource');
+            const LimiteCarga = formData.get('LimiteCarga');
 
             const payload = {};
             if (TasaEmisionSource) payload.TasaEmisionSource = TasaEmisionSource;
             if (MontoUSDSource) payload.MontoUSDSource = MontoUSDSource;
+            if (LimiteCarga !== null && LimiteCarga !== undefined) payload.LimiteCarga = LimiteCarga;
 
             const btn = settingsFormElement.querySelector('button[type="submit"]');
             btn.innerHTML = '<i class="loader" style="width:14px;height:14px;border-color:white;border-bottom-color:transparent;"></i> Guardando...';

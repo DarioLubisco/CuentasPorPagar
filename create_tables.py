@@ -132,6 +132,39 @@ def create_tables():
         IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='CreditNotesTracking' AND COLUMN_NAME='MontoMExOrig')
             ALTER TABLE [Procurement].[CreditNotesTracking] ADD [MontoMExOrig] DECIMAL(18,2) NULL;
         """)
+
+        # 4e. Upgrade DebitNotesTracking schema (Phase 11)
+        cursor.execute("""
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='DebitNotesTracking' AND COLUMN_NAME='Id')
+        BEGIN
+            DECLARE @ConstraintName nvarchar(200)
+            SELECT @ConstraintName = Name FROM sys.key_constraints WHERE parent_object_id = OBJECT_ID('Procurement.DebitNotesTracking') AND type = 'PK'
+            IF @ConstraintName IS NOT NULL
+                EXEC('ALTER TABLE Procurement.DebitNotesTracking DROP CONSTRAINT ' + @ConstraintName)
+            
+            ALTER TABLE [Procurement].[DebitNotesTracking] ADD [Id] INT IDENTITY(1,1) PRIMARY KEY;
+        END
+
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='DebitNotesTracking' AND COLUMN_NAME='Motivo')
+            ALTER TABLE [Procurement].[DebitNotesTracking] ADD [Motivo] VARCHAR(30) DEFAULT 'RETENCION';
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='DebitNotesTracking' AND COLUMN_NAME='MontoBs')
+            ALTER TABLE [Procurement].[DebitNotesTracking] ADD [MontoBs] DECIMAL(18,2) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='DebitNotesTracking' AND COLUMN_NAME='TasaCambio')
+            ALTER TABLE [Procurement].[DebitNotesTracking] ADD [TasaCambio] DECIMAL(18,4) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='DebitNotesTracking' AND COLUMN_NAME='MontoUsd')
+            ALTER TABLE [Procurement].[DebitNotesTracking] ADD [MontoUsd] DECIMAL(18,2) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='DebitNotesTracking' AND COLUMN_NAME='Observacion')
+            ALTER TABLE [Procurement].[DebitNotesTracking] ADD [Observacion] VARCHAR(200) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='DebitNotesTracking' AND COLUMN_NAME='TasaCambioOrig')
+            ALTER TABLE [Procurement].[DebitNotesTracking] ADD [TasaCambioOrig] DECIMAL(18,4) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='Procurement' AND TABLE_NAME='DebitNotesTracking' AND COLUMN_NAME='MontoMExOrig')
+            ALTER TABLE [Procurement].[DebitNotesTracking] ADD [MontoMExOrig] DECIMAL(18,2) NULL;
+        """)
+
+        # 4f. Data migration (Phase 11) - must be a separate block
+        cursor.execute("""
+        UPDATE [Procurement].[DebitNotesTracking] SET MontoBs = MontoRetencionBs WHERE MontoBs IS NULL AND MontoRetencionBs IS NOT NULL;
+        """)
         
         # 5. CreditNotesTracking
         print("Creating table CreditNotesTracking...")

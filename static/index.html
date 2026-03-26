@@ -1312,6 +1312,19 @@
                                 </div>
                             </div>
 
+                            <div class="settings-group" style="margin-bottom: 2rem; padding: 1.5rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                                <h3 style="margin-bottom: 0.5rem; font-size: 1.05rem; color: var(--primary-accent);">3. Límite de Carga (Listado Principal)</h3>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                                    Define la cantidad máxima de registros a solicitar de la tabla SACOMP al abrir el sistema, para optimizar la velocidad.
+                                </p>
+                                <div style="display: flex; flex-direction: column; gap: 0.8rem; color: var(--text-primary);">
+                                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <input type="number" name="LimiteCarga" id="settingsLimiteCarga" class="form-control" style="max-width: 150px;" min="10" placeholder="Ej: 500">
+                                        <span style="font-size: 0.9rem; color: var(--text-secondary);">(Dejar en blanco para cargar todos los registros)</span>
+                                    </label>
+                                </div>
+                            </div>
+
                             <div style="display: flex; justify-content: flex-end;">
                                 <button type="submit" class="btn btn-primary" style="padding: 0.75rem 2rem; font-size: 1rem;">
                                     <i data-lucide="save"></i> Guardar Configuración
@@ -1846,27 +1859,29 @@
                     <div id="dynBaseBs" style="text-align: right; font-weight: 600;">Bs 0.00</div>
 
                     <div style="color: var(--text-secondary);">IVA (Recalculado):</div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <span id="dynIvaUsd" style="color: var(--success); font-weight: 600; font-size: 0.9em; white-space: nowrap;">$ 0.00</span>
-                        <span id="dynIvaBs" style="text-align: right; font-weight: 600; color: var(--warning); white-space: nowrap;">Bs 0.00</span>
+                    <div style="display: flex; flex-direction: column; width: 100%;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                            <span id="dynIvaUsd" style="color: var(--success); font-weight: 600; font-size: 0.9em; white-space: nowrap;">$ 0.00</span>
+                            <span id="dynIvaBs" style="text-align: right; font-weight: 600; color: var(--warning); white-space: nowrap;">Bs 0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-top: 1px dotted rgba(255,255,255,0.1); padding-top: 5px; margin-top: 5px; font-size: 0.85em;">
+                            <span style="color: var(--text-secondary);">↳ IVA A Pagar:</span>
+                            <span id="dynIvaAPagar" style="text-align: right; font-weight: 600; color: var(--primary-accent);">Bs 0.00</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 0.85em; margin-top: 3px;">
+                            <span style="color: var(--text-secondary);">↳ IVA Retenido:</span>
+                            <span id="dynIvaRetenido" style="text-align: right; font-weight: 600; color: var(--danger);">Bs 0.00</span>
+                        </div>
                     </div>
 
                     <div style="color: var(--text-secondary);">Exento (Recalculado):</div>
                     <div id="dynExentoBs" style="text-align: right; font-weight: 600;">Bs 0.00</div>
                 </div>
 
-                <div style="margin-top: 1rem; background: rgba(16, 185, 129, 0.1); border: 1px solid var(--success); padding: 1rem; border-radius: var(--radius-sm);">
-                    <div style="display:flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                        <span style="color: var(--text-secondary); font-size: 0.85rem;">Monto Retención (Bs):</span>
-                        <span id="dynRetencionBs" style="font-weight: 600; color: var(--warning);">Bs 0.00</span>
-                    </div>
-                    <div style="display:flex; justify-content: space-between; margin-bottom: 0.75rem;">
-                        <span style="color: var(--text-secondary); font-size: 0.85rem;">Monto Restante (Bs):</span>
-                        <span id="dynRestanteBs" style="font-weight: 600; color: var(--primary-accent);">Bs 0.00</span>
-                    </div>
-                    <div style="border-top: 1px solid rgba(16, 185, 129, 0.3); padding-top: 0.5rem; text-align: center;">
-                        <p style="margin: 0; color: var(--text-secondary); font-size: 0.85rem;">Total a Pagar (Bs):</p>
-                        <h2 id="dynMtoTotalBs" style="margin: 0.25rem 0 0 0; color: var(--success); font-size: 1.35rem;">Bs 0.00</h2>
+                <div style="margin-top: 0.75rem; background: rgba(99, 102, 241, 0.05); border: 1px solid var(--primary-accent); padding: 0.85rem; border-radius: var(--radius-sm);">
+                    <div style="display:flex; justify-content: space-between; align-items: center;">
+                        <span style="color: var(--text-secondary); font-weight: 500;">TOTAL A PAGAR (Bs):</span>
+                        <strong id="dynRestanteBs" style="font-size: 1.4rem; color: var(--primary-accent);">Bs 0.00</strong>
                     </div>
                 </div>
             </div>
@@ -2023,12 +2038,16 @@
                         <input type="number" id="ieFactor" class="form-control" step="0.0001" min="0">
                     </div>
                     <div class="input-group">
-                        <label>Monto USD (MontoMEx):</label>
-                        <input type="number" id="ieMontoMEx" class="form-control" step="0.01" min="0">
+                        <label>Monto USD:</label>
+                        <input type="number" id="ieMontoMEx" class="form-control" step="0.0001" min="0">
                     </div>
                     <div class="input-group">
                         <label>Base Imponible (Bs):</label>
                         <input type="number" id="ieTGravable" class="form-control" step="0.01" min="0">
+                    </div>
+                    <div class="input-group">
+                        <label>IVA (Bs):</label>
+                        <input type="number" id="ieIVA" class="form-control" step="0.01" min="0">
                     </div>
                 </div>
 
@@ -2051,7 +2070,7 @@
                     </div>
                 </div>
 
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1rem;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
                     <div class="input-group">
                         <label>Mto Total (Bs):</label>
                         <input type="number" id="ieMontoFacturaBS" class="form-control" step="0.01" min="0">
@@ -2063,10 +2082,6 @@
                     <div class="input-group">
                         <label>Crédito (Bs):</label>
                         <input type="number" id="ieCredito" class="form-control" step="0.01" min="0">
-                    </div>
-                    <div class="input-group">
-                        <label>Saldo Act. (Bs):</label>
-                        <input type="number" id="ieSaldoAct" class="form-control" step="0.01" min="0">
                     </div>
                 </div>
                 <div class="input-group">
@@ -2088,7 +2103,7 @@
 
     <datalist id="datalistProviders"></datalist>
 
-    <script src="script.js?v=9"></script>
+    <script src="script.js?v=22"></script>
     <script>
         lucide.createIcons();
     </script>
