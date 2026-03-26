@@ -2782,6 +2782,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('invoiceEditSubtitle').textContent = `Factura: ${item.NumeroD} | ${item.Descrip || ''}`;
         
+        // Auto-fetch correct rate for Emission Date on open (requested by user)
+        const emissionDate = (item.FechaE || '').split('T')[0];
+        if (emissionDate) {
+            fetch(`/api/exchange-rate?fecha=${encodeURIComponent(emissionDate)}`)
+                .then(res => res.ok ? res.json() : null)
+                .then(json => {
+                    if (json && json.rate) {
+                        document.getElementById('ieFactor').value = json.rate.toFixed(4);
+                        recalculateInvoice('Factor');
+                    }
+                })
+                .catch(err => console.error('Error auto-fetching rate on open:', err));
+        }
+
         // Save cod_prov in the form for the PATCH request
         invoiceEditForm.dataset.codProv = item.CodProv || '';
 
