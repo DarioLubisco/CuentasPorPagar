@@ -1827,6 +1827,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('saveBatchBtn').style.display = 'inline-flex';
         document.getElementById('batchSection').style.display = 'block';
+        const _extra1 = document.getElementById('batchControlsExtra');
+        if (_extra1) _extra1.style.display = 'flex';
 
         const tbodyFijos = document.getElementById('expenseBatchBodyFijos');
         const tbodyAdhoc = document.getElementById('expenseBatchBodyAdhoc');
@@ -1846,21 +1848,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
+            await fetchCashflowForBatch();
             renderBatchTable();
             fetchSavedBatch();
-        } catch (e) { tbodyFijos.innerHTML = `<tr><td colspan="5" class="text-danger">Error al generar.</td></tr>`; }
+        } catch (e) { tbodyFijos.innerHTML = `<tr><td colspan="6" class="text-danger">Error al generar.</td></tr>`; }
     };
 
     window.renderBatchTable = () => {
         const tbodyFijos = document.getElementById('expenseBatchBodyFijos');
         const tbodyAdhoc = document.getElementById('expenseBatchBodyAdhoc');
 
-        const rowTemplate = (t, idx) => `
+        const rowTemplate = (t, idx) => {
+            const fecha = (t.fecha_proyectada || '').slice(0, 10);
+            const saldoCajaUsd = (window.batchCashflowMap || {})[fecha];
+            const saldoCell = saldoCajaUsd !== undefined
+                ? `<span style="color: ${saldoCajaUsd >= 0 ? '#34d399' : '#f87171'}; font-weight:600;">$${parseFloat(saldoCajaUsd).toLocaleString('es-VE', {minimumFractionDigits:2,maximumFractionDigits:2})}</span>`
+                : `<span style="color: var(--text-secondary);">—</span>`;
+            return `
             <tr>
                 <td style="text-align: center; vertical-align: middle;">
                     ${t.isAdhoc ?
                 `<button class="btn btn-primary btn-sm" onclick="saveSingleAdhocExpense(${idx})" style="padding: 2px 6px;"><i data-lucide="check"></i> Guardar</button>`
-                : `<input type="checkbox" class="batch-checkbox form-control" style="width: 18px; height: 18px; cursor: pointer; display: inline-block; margin: 0;" data-index="${idx}" checked>`
+                : `<input type="checkbox" class="batch-checkbox form-control" style="width: 18px; height: 18px; cursor: pointer; display: inline-block; margin: 0;" data-index="${idx}">`
             }
                 </td>
                 <td style="font-weight: 500;">
@@ -1879,10 +1888,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 </td>
                 <td class="amount">
                      <input type="date" class="form-control" style="width:130px; display:inline-block; background:#1e293b; color:var(--text-primary); border:1px solid #334155; padding:0.25rem 0.5rem;" 
-                    value="${t.fecha_proyectada}" oninput="window.updateBatchDate(${idx}, this)">
+                    value="${fecha}" oninput="window.updateBatchDate(${idx}, this)">
                 </td>
+                <td class="amount">${saldoCell}</td>
             </tr>
-        `;
+        `;};
 
         tbodyFijos.innerHTML = window.currentBatchData.map((t, idx) => !t.isAdhoc ? rowTemplate(t, idx) : '').join('');
         tbodyAdhoc.innerHTML = window.currentBatchData.map((t, idx) => t.isAdhoc ? rowTemplate(t, idx) : '').join('');
@@ -1901,7 +1911,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.saveExpenseBatch = async () => {
-        if (!confirm("Advertencia: Se guardará este lote. Si ya existía un lote de gastos para este mes y año, se reemplazará por completo. ¿Deseas hacer el commit?")) return;
+        if (!confirm("Advertencia: Solo se reemplazarán los registros SELECCIONADOS (tildados) de ese mes. Los no seleccionados quedarán intactos. ¿Deseas continuar?")) return;
 
         const mes = parseInt(document.getElementById('batchMes').value);
         const anio = parseInt(document.getElementById('batchAnio').value);
@@ -1920,11 +1930,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return alert("Debe seleccionar al menos un gasto para guardar.");
         }
 
+        // Pass the descriptions of selected items so the backend only deletes those
+        const descripcionesAEliminar = selectedGastos.map(g => g.descripcion);
+
         try {
             const res = await fetch('/api/expenses/batch', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ mes, anio, gastos: selectedGastos })
+                body: JSON.stringify({ mes, anio, gastos: selectedGastos, descripcionesAEliminar })
             });
             if (!res.ok) throw new Error('Error de servidor al guardar lote');
             alert("Lote guardado exitosamente en la base de datos de Pronósticos.");
@@ -1953,6 +1966,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addAdhocExpense = () => {
         document.getElementById('saveBatchBtn').style.display = 'inline-flex';
         document.getElementById('batchSection').style.display = 'block';
+        const _extra2 = document.getElementById('batchControlsExtra');
+        if (_extra2) _extra2.style.display = 'flex';
 
         const anio = document.getElementById('batchAnio').value || new Date().getFullYear();
         let mes = document.getElementById('batchMes').value || (new Date().getMonth() + 1);
@@ -1983,19 +1998,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (!filteredData.length) {
+            const colSpan = 7;
             if (window.expenseSavedBatchData.length) {
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No hay resultados para la búsqueda.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-secondary);">No hay resultados para la búsqueda.</td></tr>`;
             } else {
-                tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">El mes está limpio en la base de datos.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center; color: var(--text-secondary);">El mes está limpio en la base de datos.</td></tr>`;
             }
             return;
         }
-        tbody.innerHTML = filteredData.map(t => `
+        tbody.innerHTML = filteredData.map(t => {
+            const fecha = (t.fecha_proyectada || '').slice(0, 10);
+            const saldoCajaUsd = (window.batchCashflowMap || {})[fecha];
+            const saldoCell = saldoCajaUsd !== undefined
+                ? `<span style="color: ${saldoCajaUsd >= 0 ? '#34d399' : '#f87171'}; font-weight:600;">$${parseFloat(saldoCajaUsd).toLocaleString('es-VE', {minimumFractionDigits:2,maximumFractionDigits:2})}</span>`
+                : `<span style="color: var(--text-secondary);">—</span>`;
+            return `
             <tr>
                 <td style="font-weight: 500;">${t.descripcion}</td>
                 <td><span class="status-badge" style="background: ${t.tipo === 'Farmacia' ? 'rgba(251, 146, 60, 0.1)' : 'rgba(192, 38, 211, 0.1)'}; color: ${t.tipo === 'Farmacia' ? '#fb923c' : '#c026d3'};">${t.tipo}</span></td>
                 <td class="amount">${usdFormatter(t.monto_usd)}</td>
-                <td class="amount">${formatDate(t.fecha_proyectada)}</td>
+                <td class="amount">
+                    <input type="date" class="form-control" value="${fecha}"
+                        style="background:#1e293b; color:var(--text-primary); border:1px solid #334155; padding:0.2rem 0.4rem; width:130px;"
+                        onchange="updateSavedExpenseDate(${t.id}, this.value)">
+                </td>
+                <td class="amount">${saldoCell}</td>
                 <td class="amount"><span class="status-badge">${t.estado}</span></td>
                 <td class="amount">
                     <button class="btn-icon text-danger" onclick="deleteSavedExpense(${t.id})">
@@ -2003,7 +2030,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </button>
                 </td>
             </tr>
-        `).join('');
+        `}).join('');
         lucide.createIcons();
     };
 
@@ -2014,11 +2041,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!tbody || !mes || !anio) return;
 
         try {
-            const res = await fetch(`/api/expenses/programmed?mes=${mes}&anio=${anio}`);
-            const { data } = await res.json();
+            const [savedRes] = await Promise.all([
+                fetch(`/api/expenses/programmed?mes=${mes}&anio=${anio}`),
+                fetchCashflowForBatch()
+            ]);
+            const { data } = await savedRes.json();
             window.expenseSavedBatchData = data || [];
             window.renderSavedBatchTable();
-        } catch (e) { tbody.innerHTML = `<tr><td colspan="6" class="text-danger">Error.</td></tr>`; }
+        } catch (e) { tbody.innerHTML = `<tr><td colspan="7" class="text-danger">Error.</td></tr>`; }
     }
 
     window.deleteSavedExpense = async (id) => {
@@ -2036,6 +2066,55 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetchForecastConsolidated();
             }
         } catch (e) { alert('Error al eliminar'); }
+    };
+
+    window.updateSavedExpenseDate = async (id, nuevaFecha) => {
+        try {
+            const res = await fetch(`/api/expenses/programmed/${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fecha_proyectada: nuevaFecha })
+            });
+            if (!res.ok) throw new Error('Error al actualizar fecha');
+            // Re-fetch so Saldo Caja column refreshes too
+            await fetchSavedBatch();
+        } catch (e) { alert('Error al guardar nueva fecha'); }
+    };
+
+    // Read cashflow data for month so Saldo Caja can be shown per-date
+    window.batchCashflowMap = {};
+    const fetchCashflowForBatch = async () => {
+        try {
+            const params = JSON.parse(localStorage.getItem('cashflowParams') || '{}');
+            const cajaUsd = params.cajaUsd || 0;
+            const cajaBs = params.cajaBs || 0;
+            const fechaArranque = params.fechaArranque || new Date().toISOString().slice(0, 10);
+            const res = await fetch(`/api/reports/forecast-consolidated?fecha_arranque=${encodeURIComponent(fechaArranque)}&caja_usd=${cajaUsd}&caja_bs=${cajaBs}`);
+            if (!res.ok) return;
+            const { data } = await res.json();
+            window.batchCashflowMap = {};
+            (data || []).forEach(row => {
+                window.batchCashflowMap[row.Periodo] = row.SaldoRealCajaUSD;
+            });
+        } catch (e) { console.warn('No se pudo cargar el cashflow para Saldo Caja:', e); }
+    };
+
+    window.selectBatch = (mode) => {
+        const checkboxes = document.querySelectorAll('.batch-checkbox');
+        checkboxes.forEach(cb => {
+            if (mode === 'all') cb.checked = true;
+            else if (mode === 'none') cb.checked = false;
+            else if (mode === 'invert') cb.checked = !cb.checked;
+        });
+    };
+
+    window.filterBatchTable = () => {
+        const query = (document.getElementById('batchDescSearch')?.value || '').toLowerCase();
+        const rows = document.querySelectorAll('#expenseBatchBodyFijos tr');
+        rows.forEach(row => {
+            const desc = row.querySelector('input[type="text"]')?.value?.toLowerCase() || '';
+            row.style.display = (!query || desc.includes(query)) ? '' : 'none';
+        });
     };
 
     // Auto-Set de Mes y Año en Batch y Cargar Lotes Previos
@@ -2239,6 +2318,15 @@ document.addEventListener('DOMContentLoaded', () => {
         abMontoUsd.value = '';
         abTasa.value = '';
         abAplicaIndex.checked = false;
+        
+        const abProntoPago = document.getElementById('abProntoPago');
+        const abTipoDescuento = document.getElementById('abTipoDescuento');
+        if (abProntoPago) abProntoPago.checked = false;
+        if (abTipoDescuento) {
+            abTipoDescuento.disabled = true;
+            abTipoDescuento.innerHTML = '<option value="0">Descuento 0%</option>';
+        }
+
         lastAutoFilledBs = '';
 
         abMontoOrigBs.textContent = 'Cargando...';
@@ -2304,9 +2392,23 @@ document.addEventListener('DOMContentLoaded', () => {
         abFechaBase.textContent = formatDate(baseDate);
         abFechaNI.textContent = formatDate(d.FechaNI_Calculada);
         abFechaPP1.textContent = formatDate(d.FechaPP1);
-        abFechaV.textContent = formatDate(d.FechaV_Calculada);
+        // Use the official expiration date from SAACXP instead of the calculated one
+        abFechaV.textContent = formatDate(d.FechaVSaint || d.FechaV_Calculada);
 
         abSaldoUsd.textContent = usdFormatter(d.SaldoRestanteUSD);
+
+        const abTipoDescuento = document.getElementById('abTipoDescuento');
+        if (abTipoDescuento) {
+            abTipoDescuento.innerHTML = '';
+            let optionsHtml = '<option value="0">Descuento 0%</option>';
+            if (d.ProntoPago1_Pct > 0) {
+                optionsHtml += `<option value="${d.ProntoPago1_Pct}">PP1: ${parseFloat(d.ProntoPago1_Pct).toFixed(2)}%</option>`;
+            }
+            if (d.ProntoPago2_Pct > 0) {
+                optionsHtml += `<option value="${d.ProntoPago2_Pct}">PP2: ${parseFloat(d.ProntoPago2_Pct).toFixed(2)}%</option>`;
+            }
+            abTipoDescuento.innerHTML = optionsHtml;
+        }
 
         // Update historical UP data
         document.getElementById('abNumeroUP').textContent = d.NumeroUP || '-';
@@ -2426,6 +2528,13 @@ document.addEventListener('DOMContentLoaded', () => {
             ? parseFloat(d.MontoMEx) 
             : ((d.Monto || 0) / historicalTasa);
 
+        let pctDescuento = 0;
+        const abProntoPago = document.getElementById('abProntoPago');
+        const abTipoDescuento = document.getElementById('abTipoDescuento');
+        if (abProntoPago && abProntoPago.checked && abTipoDescuento) {
+            pctDescuento = parseFloat(abTipoDescuento.value) || 0;
+        }
+
         let subtotalUsd = (d.TotalPrd || 0) / historicalTasa;
         let fletesUsd = (d.Fletes || 0) / historicalTasa;
         let d1Usd = (d.Descto1 || 0) / historicalTasa;
@@ -2434,26 +2543,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const aplicaIndex = abAplicaIndex?.checked || false;
         const currentTasa = aplicaIndex ? (parseFloat(abTasa.value) || historicalTasa) : historicalTasa;
 
-        // Phase 20: Pre-round USD values to exactly 2 decimals to match provider math.
-        let tGravableUsd = roundFixed((parseFloat(d.TGravable) || 0) / historicalTasa);
+        // Phase 21: High precision USD (Matches Excel Sheet1)
+        let tGravableUsd = (parseFloat(d.TGravable) || 0) / historicalTasa;
         let exentoOrigBs = Math.max(0, (parseFloat(d.Monto) || 0) - (parseFloat(d.TGravable) || 0) - (parseFloat(d.MtoTax) || 0));
-        let exentoUsd = roundFixed(exentoOrigBs / historicalTasa);
+        let exentoUsd = exentoOrigBs / historicalTasa;
 
         let newBaseBs = 0, newIvaBs = 0, newExentoBs = 0, newMtoBs = 0;
 
         if (aplicaIndex) {
-            // Phase 20: Built from grounded 2-decimal USD components
             newBaseBs = roundFixed(tGravableUsd * currentTasa);
-            newIvaBs = roundFixed(newBaseBs * 0.16);
             newExentoBs = roundFixed(exentoUsd * currentTasa);
-            newMtoBs = roundFixed(newBaseBs + newIvaBs + newExentoBs);
         } else {
-            // Phase 13: STRICT original BS values from DB
             newBaseBs = roundFixed(parseFloat(d.TGravable) || 0);
-            newIvaBs = roundFixed(parseFloat(d.MtoTax) || 0);
             newExentoBs = roundFixed(exentoOrigBs);
-            newMtoBs = roundFixed(newBaseBs + newIvaBs + newExentoBs);
         }
+
+        if (pctDescuento > 0) {
+            const fDescuento = (1 - (pctDescuento / 100.0));
+            newBaseBs = roundFixed(newBaseBs * fDescuento);
+            newExentoBs = roundFixed(newExentoBs * fDescuento);
+        }
+
+        newIvaBs = roundFixed(newBaseBs * 0.16);
+        newMtoBs = roundFixed(newBaseBs + newIvaBs + newExentoBs);
 
         const isReten = d.EsReten == 1 || d.EsReten === true || String(d.EsReten) === '1';
         let porctRet = parseFloat(d.PorctRet) || 0;
@@ -2463,7 +2575,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const newIvaAPagarBs = roundFixed(newIvaBs - newRetencionBs);
         // Phase 20: newTotalBs correctly references newMtoBs (which considers indexation)
         const newTotalBs = roundFixed(newMtoBs - (parseFloat(d.TotalBsAbonado) || 0));
-        const newRestanteBs = roundFixed(newTotalBs - newRetencionBs);
+        let newRestanteBs = roundFixed(newTotalBs - newRetencionBs);
+        
+        let descuentoUsd = 0;
+        if (pctDescuento > 0) {
+            descuentoUsd = roundFixed(mtoTotalUsd * (pctDescuento / 100.0));
+            const dynDescuentoBox = document.getElementById('dynDescuentoBox');
+            if (dynDescuentoBox) {
+                dynDescuentoBox.style.display = 'flex';
+                document.getElementById('dynPctDesc').textContent = pctDescuento;
+                document.getElementById('dynMontoDescUsd').textContent = '-' + usdFormatter(descuentoUsd);
+            }
+        } else {
+            const dynDescuentoBox = document.getElementById('dynDescuentoBox');
+            if (dynDescuentoBox) dynDescuentoBox.style.display = 'none';
+        }
         
         ivaUsd = (newIvaBs / currentTasa);
         
@@ -2523,22 +2649,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let baseBs = 0, ivaBs = 0, exentoBs = 0, newMtoBs = 0;
 
-        // Phase 20: Pre-round USD values exactly the same way
-        let tGravableUsd = roundFixed((parseFloat(d.TGravable) || 0) / historicalTasa);
+        // Phase 21: High precision USD (Matches Excel Sheet1)
+        let tGravableUsd = (parseFloat(d.TGravable) || 0) / historicalTasa;
         let exentoOrigBs = Math.max(0, (parseFloat(d.Monto) || 0) - (parseFloat(d.TGravable) || 0) - (parseFloat(d.MtoTax) || 0));
-        let exentoUsd = roundFixed(exentoOrigBs / historicalTasa);
+        let exentoUsd = exentoOrigBs / historicalTasa;
 
         if (aplicaIndexacion) {
             baseBs = roundFixed(tGravableUsd * tasa);
-            ivaBs = roundFixed(baseBs * 0.16);
             exentoBs = roundFixed(exentoUsd * tasa);
-            newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
         } else {
             // Phase 13: STRICT original BS values from DB
             baseBs = roundFixed(parseFloat(d.TGravable) || 0);
-            ivaBs = roundFixed(parseFloat(d.MtoTax) || 0);
-            newMtoBs = roundFixed(parseFloat(d.Monto) || 0);
+            exentoBs = roundFixed(exentoOrigBs);
         }
+        
+        let pctDescuento = 0;
+        const abProntoPago = document.getElementById('abProntoPago');
+        const abTipoDescuento = document.getElementById('abTipoDescuento');
+        if (abProntoPago && abProntoPago.checked && abTipoDescuento) {
+            pctDescuento = parseFloat(abTipoDescuento.value) || 0;
+        }
+
+        if (pctDescuento > 0) {
+            const fDescuento = (1 - (pctDescuento / 100.0));
+            baseBs = roundFixed(baseBs * fDescuento);
+            exentoBs = roundFixed(exentoBs * fDescuento);
+        }
+
+        ivaBs = roundFixed(baseBs * 0.16);
+        newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
         
         const isReten = String(d.EsReten) === '1' || d.EsReten === true;
         let retencionBs = 0;
@@ -2553,6 +2692,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Suggested final amount subtracts un-emitted retentions from the active saldo
         let finalBs = roundFixed(saldoTargetBs - retencionBs);
+        
         if (finalBs < 0) finalBs = 0;
         
         let targetBs = finalBs.toFixed(2);
@@ -2592,6 +2732,18 @@ document.addEventListener('DOMContentLoaded', () => {
     abFechaPago?.addEventListener('change', updateExchangeRate);
     abMontoBs?.addEventListener('input', calculateUsdAmount);
     abAplicaIndex?.addEventListener('change', () => {
+        fillDefaultPaymentAmount(true);
+        calculateUsdAmount();
+    });
+    
+    const abProntoPago = document.getElementById('abProntoPago');
+    const abTipoDescuento = document.getElementById('abTipoDescuento');
+    abProntoPago?.addEventListener('change', () => {
+        if (abTipoDescuento) abTipoDescuento.disabled = !abProntoPago.checked;
+        fillDefaultPaymentAmount(true);
+        calculateUsdAmount();
+    });
+    abTipoDescuento?.addEventListener('change', () => {
         fillDefaultPaymentAmount(true);
         calculateUsdAmount();
     });

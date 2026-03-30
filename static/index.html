@@ -991,10 +991,22 @@
                                 </button>
                             </div>
                         </div>
+                        <!-- Selection buttons + search: shown when batch is generated -->
+                        <div id="batchControlsExtra" style="display:none; padding: 0 1rem 0.75rem; display:none; gap: 1rem; align-items:center; flex-wrap:wrap;">
+                            <div style="display:flex; gap:0.4rem;">
+                                <button class="btn btn-secondary btn-sm" onclick="selectBatch('all')">Todas</button>
+                                <button class="btn btn-secondary btn-sm" onclick="selectBatch('none')">Ninguna</button>
+                                <button class="btn btn-secondary btn-sm" onclick="selectBatch('invert')">Invertir</button>
+                            </div>
+                            <input type="text" id="batchDescSearch" class="form-control"
+                                placeholder="Buscar plantilla por descripción..."
+                                style="max-width: 280px; background: rgba(0,0,0,0.2);"
+                                oninput="filterBatchTable()">
+                        </div>
                     </div>
                 </div>
                 <section class="table-section glassmorphism" id="batchSection" style="display: none;">
-                    <h3 style="margin-top:0px; margin-bottom: 15px; color: var(--text-primary)">Gastos Farmacia
+                    <h3 style="margin-top:0; margin-bottom: 15px; color: var(--text-primary)">Gastos Farmacia
                         (Plantillas)</h3>
                     <div class="table-responsive" style="margin-bottom: 30px;">
                         <table id="expenseBatchTableFijos">
@@ -1012,13 +1024,14 @@
                                     <th class="amount sortable" data-sort="fecha_proyectada">Fecha Pautada <div
                                             class="sort-icon"></div>
                                     </th>
+                                    <th class="amount">Saldo Caja</th>
                                 </tr>
                             </thead>
                             <tbody id="expenseBatchBodyFijos"></tbody>
                         </table>
                     </div>
 
-                    <h3 style="margin-top:0px; margin-bottom: 15px; color: var(--text-primary)">Gastos Variables
+                    <h3 style="margin-top:20px; margin-bottom: 15px; color: var(--text-primary)">Gastos Variables
                         (Ad-hoc)</h3>
                     <div class="table-responsive">
                         <table id="expenseBatchTableAdhoc">
@@ -1036,6 +1049,7 @@
                                     <th class="amount sortable" data-sort="fecha_proyectada">Fecha Pautada <div
                                             class="sort-icon"></div>
                                     </th>
+                                    <th class="amount">Saldo Caja</th>
                                 </tr>
                             </thead>
                             <tbody id="expenseBatchBodyAdhoc"></tbody>
@@ -1065,6 +1079,7 @@
                                     <th class="amount sortable" data-sort="fecha_proyectada">Fecha <div
                                             class="sort-icon"></div>
                                     </th>
+                                    <th class="amount">Saldo Caja</th>
                                     <th class="amount sortable" data-sort="estado">Estado <div class="sort-icon"></div>
                                     </th>
                                     <th class="amount">Eliminar</th>
@@ -1685,11 +1700,19 @@
                                 style="color: var(--success); font-weight: bold; background: rgba(16, 185, 129, 0.05);">
                         </div>
 
-                        <label
-                            style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-top: 0.5rem;">
-                            <input type="checkbox" id="abAplicaIndex">
-                            <span>¿Aplicar Indexación? (Usar la tasa del día en lugar de la original)</span>
-                        </label>
+                        <div style="display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; flex-wrap: wrap;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                <input type="checkbox" id="abAplicaIndex">
+                                <span>¿Aplicar Indexación?</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-left: auto;">
+                                <input type="checkbox" id="abProntoPago">
+                                <span>Pronto Pago</span>
+                            </label>
+                            <select id="abTipoDescuento" class="form-control" style="width: auto; padding: 0.3rem 0.6rem; min-width: 140px;" disabled>
+                                <option value="0">Descuento 0%</option>
+                            </select>
+                        </div>
 
                         <div class="input-group" style="margin-top: 0.5rem;">
                             <label>Referencia / Notas:</label>
@@ -1850,6 +1873,11 @@
                 <div style="display: flex; justify-content: space-between; margin-bottom: 0.75rem;">
                     <span style="color: var(--text-secondary);">Monto Total Original (USD):</span>
                     <strong id="dynMtoTotalUsd" style="color: var(--success);">$ 0.00</strong>
+                </div>
+
+                <div id="dynDescuentoBox" style="display: none; justify-content: space-between; margin-bottom: 0.75rem; border-top: 1px dotted rgba(255,255,255,0.1); padding-top: 0.5rem;">
+                    <span style="color: var(--warning);">Descuento PP (<span id="dynPctDesc">0</span>%):</span>
+                    <strong id="dynMontoDescUsd" style="color: var(--warning);">-$ 0.00</strong>
                 </div>
 
                 <hr style="border:0; border-top:1px solid var(--border-color); margin: 0.75rem 0;">

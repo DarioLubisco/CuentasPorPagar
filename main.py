@@ -88,6 +88,7 @@ class BatchExpenseRequest(BaseModel):
     mes: int
     anio: int
     gastos: List[ProgrammedExpense]
+    descripcionesAEliminar: Optional[List[str]] = None
 
 # --- Modelos Módulo Pagos e Indexación ---
 class ProveedorCondicion(BaseModel):
@@ -2106,9 +2107,23 @@ async def save_expense_batch(payload: BatchExpenseRequest):
         conn = database.get_db_connection()
         cursor = conn.cursor()
         
-        # Elimina lo que sea de ese mes para evitar duplicados si el usuario regenera y guarda.
-        # But only delete the generated templates (is_adhoc = 0 or NULL), not the individual varianbles.
-        cursor.execute("DELETE FROM EnterpriseAdmin_AMC.Procurement.GastosProgramados WHERE YEAR(fecha_proyectada) = ? AND MONTH(fecha_proyectada) = ? AND (is_adhoc = 0 OR is_adhoc IS NULL)", (payload.anio, payload.mes))
+        # Elimina SOLO los registros cuya descripcion viene en el payload (los que el usuario seleccionó)
+        # Si no se envían descripciones, borra todo el mes (comportamiento legacy)
+        if payload.descripcionesAEliminar:
+            for desc in payload.descripcionesAEliminar:
+                cursor.execute(
+                    "DELETE FROM EnterpriseAdmin_AMC.Procurement.GastosProgramados "
+                    "WHERE YEAR(fecha_proyectada) = ? AND MONTH(fecha_proyectada) = ? "
+                    "AND (is_adhoc = 0 OR is_adhoc IS NULL) AND descripcion = ?",
+                    (payload.anio, payload.mes, desc)
+                )
+        else:
+            cursor.execute(
+                "DELETE FROM EnterpriseAdmin_AMC.Procurement.GastosProgramados "
+                "WHERE YEAR(fecha_proyectada) = ? AND MONTH(fecha_proyectada) = ? "
+                "AND (is_adhoc = 0 OR is_adhoc IS NULL)",
+                (payload.anio, payload.mes)
+            )
         
         # Insertar los nuevos generados de la UI
         for e in payload.gastos:
@@ -2176,6 +2191,29 @@ async def delete_programmed_expense(id: int):
             raise HTTPException(status_code=404, detail="Gasto no encontrado")
         conn.commit()
         return {"message": "Gasto eliminado"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.patch("/api/expenses/programmed/{id}")
+async def patch_programmed_expense(id: int, payload: dict = Body(...)):
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        if "fecha_proyectada" in payload:
+            cursor.execute(
+                "UPDATE EnterpriseAdmin_AMC.Procurement.GastosProgramados SET fecha_proyectada = ? WHERE id = ?",
+                (payload["fecha_proyectada"], id)
+            )
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Gasto no encontrado")
+            conn.commit()
+            return {"message": "Fecha actualizada"}
+        raise HTTPException(status_code=400, detail="Campo no soportado")
     except HTTPException:
         raise
     except Exception as e:
