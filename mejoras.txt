@@ -1,0 +1,2 @@
+1) agregar a la configuración lam cantidad de data a cargar por defecto en cuantas por pagar
+2)

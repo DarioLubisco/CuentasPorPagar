@@ -3071,27 +3071,84 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
     {
         const pmModal = document.getElementById('pagoMultipleModal');
-        const pmForm = document.getElementById('pagoMultipleForm');
-        let pmItems = []; // selected invoice data items
-        let pmCxpStatuses = {}; // keyed by NumeroD
+        const pmForm  = document.getElementById('pagoMultipleForm');
+        let pmItems      = [];
+        let pmCxpStatuses = {};       // keyed by NumeroD
+        let lastProcessedPagos = [];  // saved after successful processing for re-send
+
+        const roundFixed = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
         window.closePagoMultipleModal = () => pmModal?.classList.remove('active');
+        window.closeGlobalDynamicRecalculateModal = () =>
+            document.getElementById('globalDynamicRecalculateModal')?.classList.remove('active');
+
+        // ── Helpers per-row ─────────────────────────────────────────────
+        const pmCalcRow = (row) => {
+            const nD  = row.dataset.numerod;
+            const cxp = pmCxpStatuses[nD];
+            if (!cxp) return;
+
+            const historicalTasa = parseFloat(cxp.TasaEmision) || 1;
+            const tasaDia   = parseFloat(row.querySelector('.pm-tasa')?.value) || historicalTasa;
+            const indexado  = row.querySelector('.pm-indexado')?.checked;
+            const prontoPago= row.querySelector('.pm-pronto-pago')?.checked;
+            const pctDesc   = prontoPago ? (parseFloat(row.querySelector('.pm-desc')?.value) || 0) : 0;
+
+            const tGravableUsd  = (parseFloat(cxp.TGravable) || 0) / historicalTasa;
+            const exentoOrigBs  = Math.max(0,
+                (parseFloat(cxp.Monto) || 0) - (parseFloat(cxp.TGravable) || 0) - (parseFloat(cxp.MtoTax) || 0));
+            const exentoUsd     = exentoOrigBs / historicalTasa;
+
+            const currentTasa   = (indexado && tasaDia > 0) ? tasaDia : historicalTasa;
+            let baseBs, exentoBs;
+            if (indexado) {
+                baseBs   = roundFixed(tGravableUsd  * currentTasa);
+                exentoBs = roundFixed(exentoUsd     * currentTasa);
+            } else {
+                baseBs   = roundFixed(parseFloat(cxp.TGravable) || 0);
+                exentoBs = roundFixed(exentoOrigBs);
+            }
+
+            if (pctDesc > 0) {
+                const f = 1 - pctDesc / 100;
+                baseBs   = roundFixed(baseBs   * f);
+                exentoBs = roundFixed(exentoBs * f);
+            }
+
+            const ivaBs    = roundFixed(baseBs * 0.16);
+            const newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
+
+            const isReten = String(cxp.EsReten) === '1' || cxp.EsReten === true;
+            let porctRet  = parseFloat(cxp.PorctRet) || 0;
+            if (isReten && porctRet === 0) porctRet = 75;
+            const retencionBs = isReten ? roundFixed(ivaBs * (porctRet / 100)) : 0;
+
+            const totalAbonado  = parseFloat(cxp.TotalBsAbonado) || 0;
+            const saldoTargetBs = roundFixed(newMtoBs - totalAbonado);
+            let   finalBs       = roundFixed(saldoTargetBs - retencionBs);
+            if (finalBs < 0) finalBs = 0;
+
+            // Write Monto Bs
+            row.querySelector('.pm-monto-bs').value = finalBs.toFixed(2);
+
+            // Equiv USD
+            const equivUsd = currentTasa > 0 ? finalBs / currentTasa : 0;
+            row.querySelector('.pm-usd').textContent = equivUsd.toFixed(2);
+
+            pmRecalcTotals();
+        };
 
         const pmRecalcTotals = () => {
             let totalBs = 0, totalUsd = 0, totalSaldo = 0;
             document.querySelectorAll('#pmInvoicesTable tr').forEach(row => {
-                const bs = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
-                const usd = parseFloat(row.querySelector('.pm-usd')?.textContent) || 0;
-                const saldo = parseFloat(row.querySelector('.pm-saldo')?.textContent) || 0;
-                totalBs += bs;
-                totalUsd += usd;
-                totalSaldo += saldo;
+                totalBs    += parseFloat(row.querySelector('.pm-monto-bs')?.value)     || 0;
+                totalUsd   += parseFloat(row.querySelector('.pm-usd')?.textContent)    || 0;
+                totalSaldo += parseFloat(row.querySelector('.pm-saldo')?.textContent)  || 0;
             });
-            document.getElementById('pmTotalMontoBs').textContent = totalBs.toFixed(2);
+            document.getElementById('pmTotalMontoBs').textContent  = totalBs.toFixed(2);
             document.getElementById('pmTotalMontoUsd').textContent = totalUsd.toFixed(2);
             document.getElementById('pmTotalSaldoUsd').textContent = totalSaldo.toFixed(2);
 
-            // Excess calc
             const montoReal = parseFloat(document.getElementById('pmMontoTotalReal')?.value) || 0;
             const diff = montoReal - totalBs;
             const group = document.getElementById('pmExcedenteGroup');
@@ -3105,61 +3162,185 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('pmMontoTotalReal')?.addEventListener('input', pmRecalcTotals);
 
-        const pmCalcRowUsd = (row) => {
-            const bs = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
-            const indexado = row.querySelector('.pm-indexado')?.checked;
-            const tasa = parseFloat(row.querySelector('.pm-tasa')?.value) || 1;
-            const nD = row.dataset.numerod;
-            const cxp = pmCxpStatuses[nD];
-            let usd = 0;
-
-            if (!indexado && cxp && cxp.TasaEmision) {
-                usd = bs / cxp.TasaEmision;
-            } else {
-                usd = tasa > 0 ? bs / tasa : 0;
-            }
-
-            row.querySelector('.pm-usd').textContent = usd.toFixed(2);
-            pmRecalcTotals();
-        };
-
+        // ── Fetch exchange rate ─────────────────────────────────────────
         const pmFetchRate = async (row) => {
-            const fechaInput = row.querySelector('.pm-fecha');
-            const fecha = fechaInput?.value;
+            const fecha = row.querySelector('.pm-fecha')?.value;
             if (!fecha) return;
-
             try {
-                const res = await fetch(`/api/exchange-rate?fecha=${encodeURIComponent(fecha)}`);
-                if (res.ok) {
-                    const json = await res.json();
-                    const tasaInput = row.querySelector('.pm-tasa');
-                    tasaInput.value = json.rate ? json.rate.toFixed(4) : '';
-
-                    // Auto-check indexation
-                    const nD = row.dataset.numerod;
-                    const cxp = pmCxpStatuses[nD];
-                    if (cxp) {
-                        const pagoDate = new Date(fecha);
-                        const niDate = new Date(cxp.FechaNI_Calculada);
-                        pagoDate.setHours(0,0,0,0);
-                        niDate.setHours(0,0,0,0);
-                        row.querySelector('.pm-indexado').checked = pagoDate > niDate;
-
-                        // Fill default monto
-                        const indexado = row.querySelector('.pm-indexado').checked;
-                        const rate = parseFloat(tasaInput.value) || 0;
-                        if (indexado && rate > 0 && cxp.SaldoRestanteUSD > 0) {
-                            row.querySelector('.pm-monto-bs').value = (cxp.SaldoRestanteUSD * rate).toFixed(2);
-                        } else if (!indexado && cxp.Saldo != null) {
-                            row.querySelector('.pm-monto-bs').value = parseFloat(cxp.Saldo).toFixed(2);
-                        }
-                    }
-
-                    pmCalcRowUsd(row);
+                const res  = await fetch(`/api/exchange-rate?fecha=${encodeURIComponent(fecha)}`);
+                if (!res.ok) return;
+                const json = await res.json();
+                if (json.rate) {
+                    row.querySelector('.pm-tasa').value = json.rate.toFixed(4);
                 }
+                const nD  = row.dataset.numerod;
+                const cxp = pmCxpStatuses[nD];
+                if (cxp) {
+                    const pagoDate = new Date(fecha);
+                    const niDate   = new Date(cxp.FechaNI_Calculada);
+                    pagoDate.setHours(0,0,0,0);
+                    niDate.setHours(0,0,0,0);
+                    row.querySelector('.pm-indexado').checked = pagoDate > niDate;
+                }
+                pmCalcRow(row);
             } catch (e) { console.error(e); }
         };
 
+        // ── Open row-level Recálculo Dinámico ───────────────────────────
+        const pmOpenRowDynamic = (row) => {
+            const nD  = row.dataset.numerod;
+            const cxp = pmCxpStatuses[nD];
+            if (!cxp) return;
+
+            const indexado   = row.querySelector('.pm-indexado')?.checked;
+            const prontoPago = row.querySelector('.pm-pronto-pago')?.checked;
+            const pctDesc    = prontoPago ? (parseFloat(row.querySelector('.pm-desc')?.value) || 0) : 0;
+            const tasaDia    = parseFloat(row.querySelector('.pm-tasa')?.value) || 0;
+            if (!tasaDia) { showToast('Cargando tasa BCV…', 'warning'); return; }
+
+            const historicalTasa = parseFloat(cxp.TasaEmision) || 1;
+            const currentTasa    = (indexado && tasaDia > 0) ? tasaDia : historicalTasa;
+
+            const tGravableUsd = (parseFloat(cxp.TGravable) || 0) / historicalTasa;
+            const exentoOrigBs = Math.max(0,
+                (parseFloat(cxp.Monto)||0)-(parseFloat(cxp.TGravable)||0)-(parseFloat(cxp.MtoTax)||0));
+            const exentoUsd    = exentoOrigBs / historicalTasa;
+
+            let baseBs, exentoBs;
+            if (indexado) {
+                baseBs   = roundFixed(tGravableUsd * currentTasa);
+                exentoBs = roundFixed(exentoUsd    * currentTasa);
+            } else {
+                baseBs   = roundFixed(parseFloat(cxp.TGravable) || 0);
+                exentoBs = roundFixed(exentoOrigBs);
+            }
+            if (pctDesc > 0) {
+                const f = 1 - pctDesc / 100;
+                baseBs   = roundFixed(baseBs   * f);
+                exentoBs = roundFixed(exentoBs * f);
+            }
+            const ivaBs   = roundFixed(baseBs * 0.16);
+            const newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
+
+            const isReten = String(cxp.EsReten) === '1' || cxp.EsReten === true;
+            let porctRet  = parseFloat(cxp.PorctRet) || 0;
+            if (isReten && porctRet === 0) porctRet = 75;
+            const retencionBs    = isReten ? roundFixed(ivaBs * (porctRet / 100)) : 0;
+            const ivaAPagarBs    = roundFixed(ivaBs - retencionBs);
+            const totalAbonado   = parseFloat(cxp.TotalBsAbonado) || 0;
+            const saldoTargetBs  = roundFixed(newMtoBs - totalAbonado);
+            const newRestanteBs  = roundFixed(saldoTargetBs - retencionBs);
+
+            // Populate dynModal (reuse existing single-invoice modal elements)
+            const dynModal = document.getElementById('dynamicInvoiceStatusModal');
+            if (!dynModal) return;
+
+            dynModal.querySelector('#dynTasaBcv'     )&&(dynModal.querySelector('#dynTasaBcv'     ).textContent = formatBs(currentTasa));
+            dynModal.querySelector('#dynBaseBs'      )&&(dynModal.querySelector('#dynBaseBs'      ).textContent = formatBs(baseBs));
+            dynModal.querySelector('#dynIvaBs'       )&&(dynModal.querySelector('#dynIvaBs'       ).textContent = formatBs(ivaBs));
+            dynModal.querySelector('#dynIvaAPagar'   )&&(dynModal.querySelector('#dynIvaAPagar'   ).textContent = formatBs(ivaAPagarBs));
+            dynModal.querySelector('#dynIvaRetenido' )&&(dynModal.querySelector('#dynIvaRetenido' ).textContent = formatBs(retencionBs));
+            dynModal.querySelector('#dynExentoBs'    )&&(dynModal.querySelector('#dynExentoBs'    ).textContent = formatBs(exentoBs));
+            dynModal.querySelector('#dynRestanteBs'  )&&(dynModal.querySelector('#dynRestanteBs'  ).textContent = formatBs(newRestanteBs));
+
+            const mtoTotalUsd = ((parseFloat(cxp.Monto)||0) / historicalTasa);
+            dynModal.querySelector('#dynMtoTotalUsd' )&&(dynModal.querySelector('#dynMtoTotalUsd' ).textContent = usdFormatter(mtoTotalUsd));
+            dynModal.querySelector('#dynSubtotalUsd' )&&(dynModal.querySelector('#dynSubtotalUsd' ).textContent = usdFormatter((parseFloat(cxp.TotalPrd)||0) / historicalTasa));
+
+            if (pctDesc > 0) {
+                const dbox = dynModal.querySelector('#dynDescuentoBox');
+                if (dbox) dbox.style.display = 'flex';
+                dynModal.querySelector('#dynPctDesc')      && (dynModal.querySelector('#dynPctDesc').textContent      = pctDesc);
+                dynModal.querySelector('#dynMontoDescUsd') && (dynModal.querySelector('#dynMontoDescUsd').textContent = '-' + usdFormatter(roundFixed(mtoTotalUsd * pctDesc / 100)));
+            } else {
+                const dbox = dynModal.querySelector('#dynDescuentoBox');
+                if (dbox) dbox.style.display = 'none';
+            }
+            dynModal.querySelector('#dynDesctoFletesBox')&&(dynModal.querySelector('#dynDesctoFletesBox').innerHTML = '');
+            dynModal.querySelector('#dynIvaUsd')&&(dynModal.querySelector('#dynIvaUsd').textContent = usdFormatter(ivaBs / currentTasa));
+
+            dynModal.classList.add('active');
+            lucide.createIcons();
+        };
+
+        // ── Open global summary modal ───────────────────────────────────
+        document.getElementById('btnGlobalDynamicStatus')?.addEventListener('click', () => {
+            const tbody = document.getElementById('globalDynamicBody');
+            if (!tbody) return;
+
+            let totBase=0, totIva=0, totExento=0, totRetIva=0, totRetIslr=0, totTotal=0;
+            const rows = [];
+
+            document.querySelectorAll('#pmInvoicesTable tr').forEach(row => {
+                const nD  = row.dataset.numerod;
+                const cxp = pmCxpStatuses[nD];
+                if (!cxp) return;
+
+                const indexado   = row.querySelector('.pm-indexado')?.checked;
+                const prontoPago = row.querySelector('.pm-pronto-pago')?.checked;
+                const pctDesc    = prontoPago ? (parseFloat(row.querySelector('.pm-desc')?.value) || 0) : 0;
+                const tasaDia    = parseFloat(row.querySelector('.pm-tasa')?.value) || 0;
+                const historicalTasa = parseFloat(cxp.TasaEmision) || 1;
+                const currentTasa    = (indexado && tasaDia > 0) ? tasaDia : historicalTasa;
+
+                const tGravableUsd = (parseFloat(cxp.TGravable)||0) / historicalTasa;
+                const exentoOrigBs = Math.max(0, (parseFloat(cxp.Monto)||0)-(parseFloat(cxp.TGravable)||0)-(parseFloat(cxp.MtoTax)||0));
+                const exentoUsd    = exentoOrigBs / historicalTasa;
+
+                let baseBs, exentoBs;
+                if (indexado) {
+                    baseBs   = roundFixed(tGravableUsd * currentTasa);
+                    exentoBs = roundFixed(exentoUsd    * currentTasa);
+                } else {
+                    baseBs   = roundFixed(parseFloat(cxp.TGravable)||0);
+                    exentoBs = roundFixed(exentoOrigBs);
+                }
+                if (pctDesc > 0) {
+                    const f = 1 - pctDesc / 100;
+                    baseBs   = roundFixed(baseBs   * f);
+                    exentoBs = roundFixed(exentoBs * f);
+                }
+
+                const ivaBs    = roundFixed(baseBs * 0.16);
+                const newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
+
+                const isReten = String(cxp.EsReten) === '1' || cxp.EsReten === true;
+                let porctRet  = parseFloat(cxp.PorctRet) || 0;
+                if (isReten && porctRet === 0) porctRet = 75;
+                const retenIvaBs  = isReten ? roundFixed(ivaBs * (porctRet / 100)) : 0;
+                const retenIslrBs = 0; // ISLR not tracked per-row currently
+
+                const totalAbonado  = parseFloat(cxp.TotalBsAbonado)||0;
+                const saldoTargetBs = roundFixed(newMtoBs - totalAbonado);
+                const subtotalBs    = roundFixed(saldoTargetBs - retenIvaBs);
+
+                totBase    += baseBs;   totIva    += ivaBs;   totExento  += exentoBs;
+                totRetIva  += retenIvaBs; totRetIslr += retenIslrBs; totTotal += subtotalBs;
+
+                rows.push(`<tr>
+                    <td style="font-weight:500;">${nD}</td>
+                    <td class="amount">${formatBs(baseBs)}</td>
+                    <td class="amount">${formatBs(ivaBs)}</td>
+                    <td class="amount">${formatBs(exentoBs)}</td>
+                    <td class="amount" style="color:var(--danger)">${formatBs(retenIvaBs)}</td>
+                    <td class="amount" style="color:var(--danger)">${formatBs(retenIslrBs)}</td>
+                    <td class="amount" style="color:var(--success); font-weight:700;">${formatBs(subtotalBs)}</td>
+                </tr>`);
+            });
+
+            tbody.innerHTML = rows.join('');
+            document.getElementById('gdobBase').textContent   = formatBs(totBase);
+            document.getElementById('gdobIva').textContent    = formatBs(totIva);
+            document.getElementById('gdobExento').textContent = formatBs(totExento);
+            document.getElementById('gdobRetIva').textContent = formatBs(totRetIva);
+            document.getElementById('gdobRetIslr').textContent= formatBs(totRetIslr);
+            document.getElementById('gdobTotal').textContent  = formatBs(totTotal);
+
+            document.getElementById('globalDynamicRecalculateModal')?.classList.add('active');
+            lucide.createIcons();
+        });
+
+        // ── Build rows when modal opens ─────────────────────────────────
         document.getElementById('btnPagoMultiple')?.addEventListener('click', async () => {
             const checked = document.querySelectorAll('.row-checkbox:checked');
             if (checked.length < 2) return;
@@ -3172,7 +3353,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (items.length < 2) return;
 
-            // Validate same provider
             const provs = new Set(items.map(i => i.CodProv));
             if (provs.size > 1) {
                 showToast('⚠️ Para pago múltiple, todas las facturas deben ser del mismo proveedor.', 'warning');
@@ -3181,9 +3361,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
             pmItems = items;
             pmCxpStatuses = {};
+            lastProcessedPagos = [];
+            document.getElementById('btnPmResendEmail') && (document.getElementById('btnPmResendEmail').disabled = true);
 
             const provName = items[0].ProveedorNombre || items[0].CodProv;
-            document.getElementById('pagoMultiSubtitle').textContent = `Proveedor: ${provName} | ${items.length} facturas seleccionadas`;
+            document.getElementById('pagoMultiSubtitle').textContent =
+                `Proveedor: ${provName} | ${items.length} facturas seleccionadas`;
 
             const today = new Date().toISOString().split('T')[0];
             const tbody = document.getElementById('pmInvoicesTable');
@@ -3191,55 +3374,101 @@ document.addEventListener('DOMContentLoaded', () => {
                 <tr data-numerod="${item.NumeroD}" data-codprov="${item.CodProv}">
                     <td style="font-weight:500;">${item.NumeroD}</td>
                     <td class="amount pm-saldo" style="color:var(--success);">...</td>
-                    <td><input type="date" class="form-control pm-fecha" value="${today}" style="width:130px;padding:0.3rem;font-size:0.8rem;"></td>
+                    <td><input type="date" class="form-control pm-fecha" value="${today}"
+                        style="width:130px;padding:0.3rem;font-size:0.8rem;"></td>
+                    <td><span class="pm-tasa-emis" style="font-size:0.8rem;color:var(--text-secondary);">—</span></td>
+                    <td style="text-align:center;">
+                        <button type="button" class="btn-icon pm-btn-calc" title="Recálculo Dinámico">
+                            <i data-lucide="calculator" style="width:15px;height:15px;"></i>
+                        </button>
+                    </td>
                     <td style="text-align:center;"><input type="checkbox" class="pm-indexado"></td>
-                    <td><input type="number" class="form-control pm-tasa" step="0.0001" readonly style="width:75px;padding:0.3rem;font-size:0.8rem;background:var(--bg-card);"></td>
-                    <td><input type="number" class="form-control pm-monto-bs" step="0.01" min="0.01" required style="width:110px;padding:0.3rem;font-size:0.8rem;"></td>
+                    <td style="text-align:center;"><input type="checkbox" class="pm-pronto-pago"></td>
+                    <td>
+                        <select class="form-control pm-desc" disabled
+                            style="width:110px;padding:0.2rem 0.4rem;font-size:0.78rem;">
+                            <option value="0">0%</option>
+                        </select>
+                    </td>
+                    <td><input type="number" class="form-control pm-tasa" step="0.0001" readonly
+                        style="width:80px;padding:0.3rem;font-size:0.8rem;background:var(--bg-card);"></td>
+                    <td><input type="number" class="form-control pm-monto-bs" step="0.01" min="0.01" required
+                        style="width:110px;padding:0.3rem;font-size:0.8rem;"></td>
                     <td class="amount pm-usd" style="font-weight:bold;color:var(--success);">0.00</td>
                 </tr>
             `).join('');
 
-            // Attach event listeners
+            // Attach row-level listeners
             tbody.querySelectorAll('tr').forEach(row => {
                 row.querySelector('.pm-fecha')?.addEventListener('change', () => pmFetchRate(row));
-                row.querySelector('.pm-monto-bs')?.addEventListener('input', () => pmCalcRowUsd(row));
-                row.querySelector('.pm-indexado')?.addEventListener('change', () => {
-                    const nD = row.dataset.numerod;
+                row.querySelector('.pm-monto-bs')?.addEventListener('input', () => {
+                    // Manual edit: just recompute USD equiv
+                    const nD  = row.dataset.numerod;
                     const cxp = pmCxpStatuses[nD];
-                    const indexado = row.querySelector('.pm-indexado').checked;
-                    const rate = parseFloat(row.querySelector('.pm-tasa').value) || 0;
-                    if (cxp) {
-                        if (indexado && rate > 0 && cxp.SaldoRestanteUSD > 0) {
-                            row.querySelector('.pm-monto-bs').value = (cxp.SaldoRestanteUSD * rate).toFixed(2);
-                        } else if (!indexado && cxp.Saldo != null) {
-                            row.querySelector('.pm-monto-bs').value = parseFloat(cxp.Saldo).toFixed(2);
+                    const tasa = parseFloat(row.querySelector('.pm-tasa')?.value) || 1;
+                    const indexado = row.querySelector('.pm-indexado')?.checked;
+                    const bs = parseFloat(row.querySelector('.pm-monto-bs').value) || 0;
+                    const currentTasa = (indexado && tasa > 0) ? tasa : (parseFloat(cxp?.TasaEmision)||1);
+                    row.querySelector('.pm-usd').textContent = (currentTasa > 0 ? bs / currentTasa : 0).toFixed(2);
+                    pmRecalcTotals();
+                });
+                row.querySelector('.pm-indexado')?.addEventListener('change', () => pmCalcRow(row));
+                row.querySelector('.pm-pronto-pago')?.addEventListener('change', () => {
+                    const nD  = row.dataset.numerod;
+                    const cxp = pmCxpStatuses[nD];
+                    const sel = row.querySelector('.pm-desc');
+                    if (sel) {
+                        sel.disabled = !row.querySelector('.pm-pronto-pago').checked;
+                        // Populate options from cxp data
+                        if (cxp && !sel.disabled) {
+                            let opts = '<option value="0">0%</option>';
+                            if (parseFloat(cxp.ProntoPago1_Pct) > 0) opts += `<option value="${cxp.ProntoPago1_Pct}">PP1: ${parseFloat(cxp.ProntoPago1_Pct).toFixed(2)}%</option>`;
+                            if (parseFloat(cxp.ProntoPago2_Pct) > 0) opts += `<option value="${cxp.ProntoPago2_Pct}">PP2: ${parseFloat(cxp.ProntoPago2_Pct).toFixed(2)}%</option>`;
+                            sel.innerHTML = opts;
                         }
                     }
-                    pmCalcRowUsd(row);
+                    pmCalcRow(row);
                 });
+                row.querySelector('.pm-desc')?.addEventListener('change', () => pmCalcRow(row));
+                row.querySelector('.pm-btn-calc')?.addEventListener('click', () => pmOpenRowDynamic(row));
             });
 
             pmModal.classList.add('active');
             lucide.createIcons();
 
-            // Fetch CXP status and exchange rate for each invoice
+            // Fetch CXP status and rate for each row
             for (const item of items) {
                 try {
                     const res = await fetch(`/api/procurement/cxp-status?cod_prov=${encodeURIComponent(item.CodProv)}&numero_d=${encodeURIComponent(item.NumeroD)}`);
-                    if (res.ok) {
-                        const json = await res.json();
-                        pmCxpStatuses[item.NumeroD] = json.data;
-                        const row = tbody.querySelector(`tr[data-numerod="${item.NumeroD}"]`);
-                        if (row) {
-                            row.querySelector('.pm-saldo').textContent = (json.data.SaldoRestanteUSD || 0).toFixed(2);
-                            await pmFetchRate(row);
-                        }
+                    if (!res.ok) continue;
+                    const json = await res.json();
+                    pmCxpStatuses[item.NumeroD] = json.data;
+
+                    const row = tbody.querySelector(`tr[data-numerod="${item.NumeroD}"]`);
+                    if (!row) continue;
+
+                    // Show balance and tasa emisión
+                    row.querySelector('.pm-saldo').textContent = (json.data.SaldoRestanteUSD || 0).toFixed(2);
+                    const tasaEmis = parseFloat(json.data.TasaEmision) || 0;
+                    const tasaEmisEl = row.querySelector('.pm-tasa-emis');
+                    if (tasaEmisEl) tasaEmisEl.textContent = tasaEmis > 0 ? bsFormatter(tasaEmis) : '—';
+
+                    // Populate discount options
+                    const sel = row.querySelector('.pm-desc');
+                    if (sel && json.data) {
+                        let opts = '<option value="0">0%</option>';
+                        if (parseFloat(json.data.ProntoPago1_Pct) > 0) opts += `<option value="${json.data.ProntoPago1_Pct}">PP1: ${parseFloat(json.data.ProntoPago1_Pct).toFixed(2)}%</option>`;
+                        if (parseFloat(json.data.ProntoPago2_Pct) > 0) opts += `<option value="${json.data.ProntoPago2_Pct}">PP2: ${parseFloat(json.data.ProntoPago2_Pct).toFixed(2)}%</option>`;
+                        sel.innerHTML = opts;
                     }
+
+                    await pmFetchRate(row);
                 } catch (e) { console.error(e); }
             }
             pmRecalcTotals();
         });
 
+        // ── Submit ──────────────────────────────────────────────────────
         pmForm?.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (pmItems.length === 0) return;
@@ -3249,19 +3478,17 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.disabled = true;
 
             const referencia = document.getElementById('pmReferencia').value;
-            const notificar = document.getElementById('pmNotificarCorreo')?.checked || false;
-            const fileInput = document.getElementById('pmComprobante');
-            const rows = document.querySelectorAll('#pmInvoicesTable tr');
+            const notificar  = document.getElementById('pmNotificarCorreo')?.checked || false;
+            const fileInput  = document.getElementById('pmComprobante');
 
-            // Build array of pagos
             const pagos = [];
-            rows.forEach((row, idx) => {
-                const nD = row.dataset.numerod;
+            document.querySelectorAll('#pmInvoicesTable tr').forEach(row => {
+                const nD      = row.dataset.numerod;
                 const codProv = row.dataset.codprov;
-                const cxp = pmCxpStatuses[nD];
+                const cxp     = pmCxpStatuses[nD];
                 const indexado = row.querySelector('.pm-indexado')?.checked;
-                const tasa = parseFloat(row.querySelector('.pm-tasa')?.value) || 0;
-                const montoBs = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
+                const tasa     = parseFloat(row.querySelector('.pm-tasa')?.value) || 0;
+                const montoBs  = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
                 const montoUsd = parseFloat(row.querySelector('.pm-usd')?.textContent) || 0;
 
                 pagos.push({
@@ -3271,20 +3498,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     MontoBsAbonado: montoBs,
                     TasaCambioDiaAbono: indexado ? tasa : (cxp?.TasaEmision || 0),
                     MontoUsdAbonado: montoUsd,
-                    AplicaIndexacion: indexado ? true : false,
+                    AplicaIndexacion: indexado || false,
                     Referencia: referencia
                 });
             });
 
-            // Use FormData to support file upload alongside JSON
             const formData = new FormData();
             formData.append('pagos_json', JSON.stringify(pagos));
             formData.append('NotificarCorreo', notificar);
-            const montoReal = parseFloat(document.getElementById('pmMontoTotalReal')?.value) || 0;
-            formData.append('MontoTotalPagado', montoReal);
-            if (fileInput && fileInput.files.length > 0) {
-                formData.append('archivo', fileInput.files[0]);
-            }
+            formData.append('MontoTotalPagado', parseFloat(document.getElementById('pmMontoTotalReal')?.value) || 0);
+            if (fileInput && fileInput.files.length > 0) formData.append('archivo', fileInput.files[0]);
 
             try {
                 const res = await fetch('/api/procurement/abonos-batch', { method: 'POST', body: formData });
@@ -3294,7 +3517,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 const result = await res.json();
                 showToast(`✅ ${result.count || pagos.length} pagos registrados exitosamente.`, 'success');
-                closePagoMultipleModal();
+
+                lastProcessedPagos = pagos;
+                // Enable Re-enviar correo now that payments have been processed
+                const resendBtn = document.getElementById('btnPmResendEmail');
+                if (resendBtn) resendBtn.disabled = false;
+
                 if (typeof fetchData === 'function') fetchData();
             } catch (err) {
                 console.error(err);
@@ -3305,6 +3533,33 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.disabled = false;
             lucide.createIcons();
         });
+
+        // ── Re-enviar correo ────────────────────────────────────────────
+        document.getElementById('btnPmResendEmail')?.addEventListener('click', async () => {
+            if (!lastProcessedPagos.length) return;
+            const btn = document.getElementById('btnPmResendEmail');
+            btn.disabled = true;
+            btn.innerHTML = '<div class="loader" style="width:14px;height:14px;border-width:2px;"></div> Enviando...';
+            try {
+                const fileInput = document.getElementById('pmComprobante');
+                const fd = new FormData();
+                fd.append('pagos_json', JSON.stringify(lastProcessedPagos));
+                if (fileInput && fileInput.files.length > 0) fd.append('archivo', fileInput.files[0]);
+                const res = await fetch('/api/procurement/send-email-batch', { method: 'POST', body: fd });
+                const json = await res.json();
+                if (json.email_sent !== false) {
+                    showToast('✅ Correo re-enviado exitosamente.', 'success');
+                } else {
+                    showToast(`⚠️ ${json.message || 'No se pudo enviar el correo.'}`, 'warning');
+                }
+            } catch (err) {
+                showToast('❌ Error al re-enviar el correo.', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="send"></i> Re-enviar correo';
+                lucide.createIcons();
+            }
+        });
     }
 
     // ==========================================
@@ -3312,6 +3567,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ==========================================
 
     const retencionesView = document.getElementById('view-retenciones');
+
     if (retencionesView) {
         const fetchRetenciones = async () => {
             const tbody = document.getElementById('retencionesTableBody');
