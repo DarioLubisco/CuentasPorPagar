@@ -359,7 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         let retenIslrBs = 0;
         if (ret_islr_abonada === 0) {
-            retenIslrBs = calcISLR(baseBs, (parseFloat(islrRate) || 0), cxp.CodProv, cxp.TipoPersona);
+            retenIslrBs = calcISLR((baseBs + exentoBs), (parseFloat(islrRate) || 0), cxp.CodProv, cxp.TipoPersona);
         }
 
         let mtoTotalUsd = 0;
