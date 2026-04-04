@@ -314,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return roundFixed(ret);
     };
 
-    const calculateInvoiceFinancials = (cxp, { tasaDia, aplicaIndex, pctDesc, islrRate }) => {
+    const calculateInvoiceFinancials = (cxp, { tasaDia, aplicaIndex, aplicaIndexIva, pctDesc, islrRate }) => {
         const historicalTasa = (cxp.Factor && cxp.Factor > 0 && window.globalRetConfig?.TasaEmisionSource === 'SACOMP') 
             ? parseFloat(cxp.Factor) 
             : parseFloat(cxp.TasaEmision) || 1;
@@ -342,7 +342,21 @@ document.addEventListener('DOMContentLoaded', () => {
             exentoBs = roundFixed(exentoBs * fDescuento);
         }
 
-        const ivaBs    = roundFixed(baseBs * 0.16);
+        // --- Granular IVA Indexation Logic ---
+        let ivaBs;
+        const indexaIVA = aplicaIndexIva !== undefined ? aplicaIndexIva : (cxp.IndexaIVA ?? true);
+        
+        if (indexaIVA && aplicaIndex) {
+            ivaBs = roundFixed(baseBs * 0.16); 
+        } else {
+            // Keep historical IVA value, but respect discounts if applied
+            let historicalIva = parseFloat(cxp.MtoTax) || 0;
+            if (pct > 0) {
+                historicalIva = roundFixed(historicalIva * (1 - (pct / 100.0)));
+            }
+            ivaBs = historicalIva;
+        }
+
         const newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
 
         const isReten = String(cxp.EsReten) === '1' || cxp.EsReten === true;
@@ -2462,6 +2476,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('editProvBase').value = p.BaseDiasCredito;
         document.getElementById('editProvDiasNI').value = p.DiasNoIndexacion;
         document.getElementById('editProvDiasV').value = p.DiasVencimiento;
+        if(document.getElementById('editProvIndexaIVA')) {
+            document.getElementById('editProvIndexaIVA').checked = p.IndexaIVA !== false;
+        }
         document.getElementById('editProvPP1Pct').value = p.ProntoPago1_Pct;
         document.getElementById('editProvPP1Dias').value = p.ProntoPago1_Dias;
         document.getElementById('editProvPP2Pct').value = p.ProntoPago2_Pct;
@@ -2488,6 +2505,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ProntoPago2_Pct: parseFloat(document.getElementById('editProvPP2Pct').value) || 0,
                 ProntoPago2_Dias: parseInt(document.getElementById('editProvPP2Dias').value) || 0,
                 Email: document.getElementById('editProvEmail').value || null,
+                IndexaIVA: document.getElementById('editProvIndexaIVA')?.checked ?? true,
                 TipoPersona: document.getElementById('editProvTipoPersona')?.value || null
             };
 
@@ -2559,6 +2577,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const abTasa = document.getElementById('abTasa');
     const abMontoUsd = document.getElementById('abMontoUsd');
     const abAplicaIndex = document.getElementById('abAplicaIndex');
+    const abIndexaIva = document.getElementById('abIndexaIVA');
     const abReferencia = document.getElementById('abReferencia');
     const abTasaLoader = document.getElementById('abTasaLoader');
 
@@ -2591,6 +2610,7 @@ document.addEventListener('DOMContentLoaded', () => {
         abMontoUsd.value = '';
         abTasa.value = '';
         abAplicaIndex.checked = false;
+        if(abIndexaIva) abIndexaIva.checked = true;
         
         const abProntoPago = document.getElementById('abProntoPago');
         const abTipoDescuento = document.getElementById('abTipoDescuento');
@@ -2891,6 +2911,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const fin = calculateInvoiceFinancials(d, {
             tasaDia: tasaDia,
             aplicaIndex: aplicaIndex,
+            aplicaIndexIva: abIndexaIva?.checked ?? true,
             pctDesc: pctDescuento,
             islrRate: islrRateModal
         });
@@ -2948,6 +2969,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // If payment date is STRICTLY greater than NI date, Indexation applies by default
         abAplicaIndex.checked = pagoDate > niDate;
+        if(abIndexaIva) {
+            abIndexaIva.checked = d.IndexaIVA !== false;
+        }
         
         fillDefaultPaymentAmount(false); 
         calculateUsdAmount();
@@ -2973,6 +2997,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const fin = calculateInvoiceFinancials(d, {
             tasaDia: tasaActual,
             aplicaIndex: aplicaIndexacion,
+            aplicaIndexIva: abIndexaIva?.checked ?? true,
             pctDesc: pctDescuento,
             islrRate: islrRate
         });
@@ -3067,6 +3092,11 @@ document.addEventListener('DOMContentLoaded', () => {
     abFechaPago?.addEventListener('change', updateExchangeRate);
     abMontoBs?.addEventListener('input', calculateUsdAmount);
     abAplicaIndex?.addEventListener('change', () => {
+        fillDefaultPaymentAmount(true);
+        calculateUsdAmount();
+    });
+    
+    abIndexaIva?.addEventListener('change', () => {
         fillDefaultPaymentAmount(true);
         calculateUsdAmount();
     });
@@ -3434,6 +3464,21 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        document.getElementById('pmIndexaIVAMaster')?.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            const tbody = document.getElementById('pmTableBody');
+            if (tbody) {
+                tbody.querySelectorAll('tr').forEach(row => {
+                    const cb = row.querySelector('.pm-indexado-iva');
+                    if (cb && !cb.disabled && cb.checked !== isChecked) {
+                        cb.checked = isChecked;
+                        pmCalcRow(row);
+                    }
+                });
+                pmRecalcTotals();
+            }
+        });
+
         const roundFixed = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
         window.closePagoMultipleModal = () => pmModal?.classList.remove('active');
@@ -3449,13 +3494,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const historicalTasa = parseFloat(cxp.TasaEmision) || 1;
             const tasaDia   = parseFloat(row.querySelector('.pm-tasa')?.value) || historicalTasa;
             const indexado  = row.querySelector('.pm-indexado')?.checked;
+            const indexaIva = row.querySelector('.pm-indexado-iva') !== null ? row.querySelector('.pm-indexado-iva').checked : (cxp.IndexaIVA ?? true);
             const prontoPago= row.querySelector('.pm-pronto-pago')?.checked;
             const pctDesc   = prontoPago ? (parseFloat(row.querySelector('.pm-desc')?.value) || 0) : 0;
-            const islrRate = parseFloat(row.querySelector('.pm-islr-concept')?.value) || 0;
+            const islrRate  = parseFloat(row.querySelector('.pm-islr-concept')?.value) || 0;
 
             const fin = calculateInvoiceFinancials(cxp, {
                 tasaDia: tasaDia,
                 aplicaIndex: indexado,
+                aplicaIndexIva: indexaIva,
                 pctDesc: pctDesc,
                 islrRate: islrRate
             });
@@ -3557,6 +3604,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     pagoDate.setHours(0,0,0,0);
                     niDate.setHours(0,0,0,0);
                     row.querySelector('.pm-indexado').checked = pagoDate > niDate;
+                    if(row.querySelector('.pm-indexado-iva')) {
+                        row.querySelector('.pm-indexado-iva').checked = cxp.IndexaIVA !== false;
+                    }
                 }
                 pmCalcRow(row);
             } catch (e) { console.error(e); }
@@ -3723,7 +3773,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             <i data-lucide="calculator" style="width:15px;height:15px;"></i>
                         </button>
                     </td>
-                    <td style="text-align:center;"><input type="checkbox" class="pm-indexado"></td>
+                    <td style="text-align:center; display:flex; flex-direction:column; gap:2px; justify-content:center; align-items:center; height:100%;">
+                        <input type="checkbox" class="pm-indexado" title="Indexar Base" style="margin:0;">
+                        <input type="checkbox" class="pm-indexado-iva" title="Indexar IVA" style="margin:0;">
+                    </td>
                     <td style="text-align:center;"><input type="checkbox" class="pm-pronto-pago"></td>
                     <td>
                         <select class="form-control pm-desc" disabled
@@ -3765,6 +3818,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     pmRecalcTotals();
                 });
                 row.querySelector('.pm-indexado')?.addEventListener('change', () => pmCalcRow(row));
+                row.querySelector('.pm-indexado-iva')?.addEventListener('change', () => pmCalcRow(row));
                 row.querySelector('.pm-pronto-pago')?.addEventListener('change', () => {
                     const nD  = row.dataset.numerod;
                     const cxp = pmCxpStatuses[nD];
@@ -3831,6 +3885,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const masterCb = document.getElementById('pmIndexadoMaster');
             if (firstCb && masterCb) {
                 masterCb.checked = firstCb.checked;
+            }
+
+            const firstIvaCb = tbody.querySelector('.pm-indexado-iva');
+            const masterIvaCb = document.getElementById('pmIndexaIVAMaster');
+            if (firstIvaCb && masterIvaCb) {
+                masterIvaCb.checked = firstIvaCb.checked;
             }
         });
 

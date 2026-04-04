@@ -1618,6 +1618,11 @@
                         <input type="number" id="editProvDiasV" class="form-control" min="0" required>
                     </div>
                 </div>
+                
+                <div class="input-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
+                    <input type="checkbox" id="editProvIndexaIVA" style="width: auto; margin: 0; cursor: pointer;" checked>
+                    <label for="editProvIndexaIVA" style="margin: 0; cursor: pointer; user-select: none;">Proveedor Indexa IVA <small style="display:block;color:var(--text-secondary);font-weight:normal;">Permite crear facturas donde la base crece por divisa, pero el IVA mantiene su valor histórico en Bs.</small></label>
+                </div>
 
                 <p
                     style="margin-top: 1rem; margin-bottom: 0.5rem; font-weight: bold; font-size: 0.9rem; color: var(--primary-accent);">
@@ -1843,11 +1848,17 @@
                                 style="color: var(--success); font-weight: bold; background: rgba(16, 185, 129, 0.05);">
                         </div>
 
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; align-items: center; margin-top: 0.5rem;">
-                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                                <input type="checkbox" id="abAplicaIndex">
-                                <span>¿Aplicar Indexación?</span>
-                            </label>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; align-items: flex-start; margin-top: 0.5rem;">
+                            <div style="display: flex; flex-direction: column; gap: 0.35rem;">
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="checkbox" id="abAplicaIndex">
+                                    <span>¿Aplicar Indexación?</span>
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-left: 1.5rem; font-size: 0.85rem; color: var(--text-secondary);" title="Controla si el IVA acompaña el alza cambiaria de la Base">
+                                    <input type="checkbox" id="abIndexaIVA">
+                                    <span>Indexar IVA</span>
+                                </label>
+                            </div>
                             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                                 <input type="checkbox" id="abProntoPago">
                                 <span>Pronto Pago</span>
@@ -1979,7 +1990,11 @@
                                 <th style="text-align:center;">
                                     <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;justify-content:center;" title="Aplicar/Quitar indexación a todas las facturas">
                                         <input type="checkbox" id="pmIndexadoMaster">
-                                        <span style="font-size:0.75rem;">Indexado</span>
+                                        <span style="font-size:0.75rem;">Idx Base</span>
+                                    </label>
+                                    <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;justify-content:center;margin-top:2px;" title="Aplicar/Quitar indexación de IVA">
+                                        <input type="checkbox" id="pmIndexaIVAMaster">
+                                        <span style="font-size:0.75rem;">Idx IVA</span>
                                     </label>
                                 </th>
                                 <th>P. Pago</th>

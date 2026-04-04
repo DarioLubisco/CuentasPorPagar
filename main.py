@@ -94,6 +94,7 @@ class BatchExpenseRequest(BaseModel):
 class ProveedorCondicion(BaseModel):
     CodProv: str
     DiasNoIndexacion: Optional[int] = 0
+    IndexaIVA: Optional[bool] = True
     BaseDiasCredito: Optional[str] = "EMISION"
     DiasVencimiento: Optional[int] = 0
     ProntoPago1_Dias: Optional[int] = 0
@@ -463,6 +464,7 @@ async def get_provider_conditions():
                    ISNULL(c.ProntoPago1_Pct, 0) AS ProntoPago1_Pct,
                    ISNULL(c.ProntoPago2_Dias, 0) AS ProntoPago2_Dias, 
                    ISNULL(c.ProntoPago2_Pct, 0) AS ProntoPago2_Pct,
+                   ISNULL(c.IndexaIVA, 1) AS IndexaIVA,
                    COALESCE(c.Email, p.Email, '') AS Email,
                    -- TipoPersona: LOCAL overrides SAINT derivation
                    COALESCE(
@@ -512,27 +514,27 @@ async def update_provider_condition(cod_prov: str, payload: ProveedorCondicion):
                 SET DiasNoIndexacion = ?, BaseDiasCredito = ?, DiasVencimiento = ?,
                     ProntoPago1_Dias = ?, ProntoPago1_Pct = ?,
                     ProntoPago2_Dias = ?, ProntoPago2_Pct = ?,
-                    Email = ?, TipoPersona = ?
+                    Email = ?, TipoPersona = ?, IndexaIVA = ?
                 WHERE CodProv = ?
             """
             cursor.execute(update_query, (
                 payload.DiasNoIndexacion, payload.BaseDiasCredito, payload.DiasVencimiento,
                 payload.ProntoPago1_Dias, payload.ProntoPago1_Pct,
                 payload.ProntoPago2_Dias, payload.ProntoPago2_Pct,
-                payload.Email, tipo_pers,
+                payload.Email, tipo_pers, payload.IndexaIVA,
                 cod_prov
             ))
         else:
             insert_query = """
                 INSERT INTO EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones 
-                (CodProv, DiasNoIndexacion, BaseDiasCredito, DiasVencimiento, ProntoPago1_Dias, ProntoPago1_Pct, ProntoPago2_Dias, ProntoPago2_Pct, Email, TipoPersona)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (CodProv, DiasNoIndexacion, BaseDiasCredito, DiasVencimiento, ProntoPago1_Dias, ProntoPago1_Pct, ProntoPago2_Dias, ProntoPago2_Pct, Email, TipoPersona, IndexaIVA)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             cursor.execute(insert_query, (
                 cod_prov, payload.DiasNoIndexacion, payload.BaseDiasCredito, payload.DiasVencimiento,
                 payload.ProntoPago1_Dias, payload.ProntoPago1_Pct,
                 payload.ProntoPago2_Dias, payload.ProntoPago2_Pct,
-                payload.Email, tipo_pers
+                payload.Email, tipo_pers, payload.IndexaIVA
             ))
             
         # Synchronize SAPROV native credit days
@@ -1337,6 +1339,7 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
                 comp.TGravable, cxp.MtoTax,
                 comp.Factor, comp.MontoMEx,
                 ISNULL(cond.DiasNoIndexacion, 0) AS DiasNoIndexacion,
+                ISNULL(cond.IndexaIVA, 1) AS IndexaIVA,
                 ISNULL(cond.BaseDiasCredito, 'EMISION') AS BaseDiasCredito,
                 ISNULL(cond.DiasVencimiento, prov.diascred) AS DiasVencimiento,
                 ISNULL(cond.ProntoPago1_Dias, 0) AS ProntoPago1_Dias,
