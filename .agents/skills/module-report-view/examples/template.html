@@ -1,0 +1,62 @@
+<div class="report-view-container glass-card">
+  <!-- Dynamic Title -->
+  <header class="report-header">
+    <h1 class="gradient-text">Reporte de Módulo de Compras</h1>
+    <div class="header-actions">
+      <button id="btnConfig" class="icon-button glass" title="Configuración">
+        <i data-lucide="settings"></i>
+      </button>
+      <button id="btnExport" class="primary-button glass" onclick="exportReport()">
+        <i data-lucide="download"></i> Exportar (Excel)
+      </button>
+    </div>
+  </header>
+
+  <!-- Filter & Search Controls -->
+  <section class="controls-grid glass-overlay">
+    <div class="filter-group">
+      <label for="fecha_inicio">Desde:</label>
+      <input type="date" id="fecha_inicio" class="glass-input">
+      <label for="fecha_fin">Hasta:</label>
+      <input type="date" id="fecha_fin" class="glass-input">
+      <button id="btnFilterProcess" class="accent-button glass" onclick="processFilters()">
+        <i data-lucide="play"></i> Procesar
+      </button>
+    </div>
+
+    <div class="filter-group">
+      <label for="filterStatus">Estatus:</label>
+      <select id="filterStatus" class="glass-select" onchange="autoFilter()">
+        <option value="ALL">Todos</option>
+        <option value="PAID">Pagado</option>
+        <option value="PENDING">Pendiente</option>
+      </select>
+    </div>
+
+    <div class="search-group">
+      <div class="search-box glass">
+        <i data-lucide="search"></i>
+        <input type="text" id="universalSearch" placeholder="Busque por Control, Factura o Proveedor..." onkeyup="debouncedSearch()">
+      </div>
+    </div>
+  </section>
+
+  <!-- Data Table -->
+  <div class="table-wrapper glass-scroll">
+    <table id="reportTable" class="glass-table">
+      <thead>
+        <tr>
+          <th onclick="sortTable('num_control')">N° Control <i data-lucide="chevrons-up-down"></i></th>
+          <th onclick="sortTable('num_factura')">N° Factura <i data-lucide="chevrons-up-down"></i></th>
+          <th onclick="sortTable('proveedor_nombre')">Proveedor <i data-lucide="chevrons-up-down"></i></th>
+          <th onclick="sortTable('fecha')">Fecha <i data-lucide="chevrons-up-down"></i></th>
+          <th onclick="sortTable('estatus')">Estatus <i data-lucide="chevrons-up-down"></i></th>
+          <th onclick="sortTable('monto_total')">Monto Total <i data-lucide="chevrons-up-down"></i></th>
+        </tr>
+      </thead>
+      <tbody id="reportContent">
+        <!-- Rendered Rows Go Here -->
+      </tbody>
+    </table>
+  </div>
+</div>

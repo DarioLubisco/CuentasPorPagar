@@ -329,11 +329,13 @@ async def get_cuentas_por_pagar(search: str = Query("", description="Search term
               CAST(CASE WHEN SAACXP.RetenIVA > 0 THEN 1 ELSE 0 END AS BIT) AS Has_Retencion,
               CAST(CASE WHEN abonos.TotalBs IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS Has_Abonos,
               ISNULL(abonos.TotalBs, 0) AS TotalBsAbonado,
+              ISNULL(abonos.TotalUSD, 0) AS TotalUsdAbonado,
               ISNULL(abonos.TotalIVA, 0) AS RetencionIvaAbonada,
               ISNULL(abonos.TotalISLR, 0) AS RetencionIslrAbonada
             FROM dbo.SAACXP
             OUTER APPLY (
                 SELECT SUM(MontoBsAbonado) AS TotalBs,
+                       SUM(MontoUsdAbonado) AS TotalUSD,
                        SUM(CASE WHEN TipoAbono = 'RETENCION_IVA' THEN MontoBsAbonado ELSE 0 END) AS TotalIVA,
                        SUM(CASE WHEN TipoAbono = 'RETENCION_ISLR' THEN MontoBsAbonado ELSE 0 END) AS TotalISLR
                 FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos A 

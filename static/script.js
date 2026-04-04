@@ -362,17 +362,21 @@ document.addEventListener('DOMContentLoaded', () => {
             retenIslrBs = calcISLR(baseBs, (parseFloat(islrRate) || 0), cxp.CodProv, cxp.TipoPersona);
         }
 
-        const totalAbonado = parseFloat(cxp.TotalBsAbonado) || 0;
-        const saldoTargetBs = roundFixed(newMtoBs - totalAbonado);
+        const mtoTotalUsd = (window.globalRetConfig?.MontoUsdSource === 'SACOMP' && cxp.MontoMEx > 0) 
+            ? parseFloat(cxp.MontoMEx) 
+            : ((parseFloat(cxp.Monto) || 0) / historicalTasa);
+
+        const totalUsdAbonado = parseFloat(cxp.TotalUsdAbonado) || 0;
+        let remainingUsd = mtoTotalUsd - totalUsdAbonado;
+        if (remainingUsd < 0) remainingUsd = 0;
+        
+        // Reflects 'temporal reality': only the unpaid portion in USD is multiplied by the current BCV rate
+        const saldoTargetBs = roundFixed(remainingUsd * currentTasa);
         
         let finalBs = roundFixed(saldoTargetBs - retencionBs - retenIslrBs);
         if (finalBs < 0) finalBs = 0;
 
         const equivUsd = currentTasa > 0 ? (finalBs / currentTasa) : 0;
-        
-        const mtoTotalUsd = (window.globalRetConfig?.MontoUsdSource === 'SACOMP' && cxp.MontoMEx > 0) 
-            ? parseFloat(cxp.MontoMEx) 
-            : ((cxp.Monto || 0) / historicalTasa);
             
         let descUsdMonto = 0;
         if(pct > 0) {
@@ -477,7 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
             window.renderTable();
         } catch (error) {
             console.error('Fetch error:', error);
-            tableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 2rem;">Error al cargar datos.</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--danger); padding: 2rem;">Error al cargar datos.<br></td></tr>`;
         }
     };
 
@@ -620,9 +624,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const saldo = parseFloat(item.Saldo) || 0;
             const tasaEmi = parseFloat(item.TasaEmision) || 1;
             const tasaAct = parseFloat(item.TasaActual) || 1;
+            const indexado = tasaAct > tasaEmi;
 
-            const montoUsd = saldo / tasaEmi;
-            const saldoActualizadoBs = montoUsd * tasaAct;
+            const fin = calculateInvoiceFinancials(item, {
+                tasaDia: tasaAct,
+                aplicaIndex: indexado,
+                pctDesc: 0,
+                islrRate: 0
+            });
+
+            let saldoActualizadoBs = fin.finalBs;
+            let montoUsd = fin.equivUsd;
+
+            // Apply tolerance zeroing for display
+            const tolerance = parseFloat(window.globalRetConfig?.ToleranceSaldo) || 0.50;
+            if (saldoActualizadoBs <= tolerance) {
+                saldoActualizadoBs = 0;
+                montoUsd = 0;
+            }
 
             totalBs += saldoActualizadoBs;
             totalUsd += montoUsd;
@@ -3340,8 +3359,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if(row.querySelector('.pm-iva-bs'))        row.querySelector('.pm-iva-bs').textContent        = fin.ivaBs.toFixed(2);
             if(row.querySelector('.pm-iva-apagar-bs')) row.querySelector('.pm-iva-apagar-bs').textContent = fin.ivaAPagarBs.toFixed(2);
             if(row.querySelector('.pm-exento-bs'))     row.querySelector('.pm-exento-bs').textContent     = fin.exentoBs.toFixed(2);
-            if(row.querySelector('.pm-retiva-bs'))     row.querySelector('.pm-retiva-bs').textContent     = fin.retencionBs.toFixed(2);
-            if(row.querySelector('.pm-retislr-bs'))    row.querySelector('.pm-retislr-bs').textContent    = fin.retenIslrBs.toFixed(2);
+            if(row.querySelector('.pm-retiva-bs'))     row.querySelector('.pm-retiva-bs').textContent     = (fin.retencionBs + (parseFloat(cxp.RetencionIvaAbonada) || 0)).toFixed(2);
+            if(row.querySelector('.pm-retislr-bs'))    row.querySelector('.pm-retislr-bs').textContent    = (fin.retenIslrBs + (parseFloat(cxp.RetencionIslrAbonada) || 0)).toFixed(2);
 
             // Write Monto Bs (Defaults to the full debt amount)
             row.querySelector('.pm-monto-bs').value = fin.finalBs.toFixed(2);
@@ -3465,8 +3484,8 @@ document.addEventListener('DOMContentLoaded', () => {
             dynModal.querySelector('#dynBaseBs'      )&&(dynModal.querySelector('#dynBaseBs'      ).textContent = formatBs(fin.baseBs));
             dynModal.querySelector('#dynIvaBs'       )&&(dynModal.querySelector('#dynIvaBs'       ).textContent = formatBs(fin.ivaBs));
             dynModal.querySelector('#dynIvaAPagar'   )&&(dynModal.querySelector('#dynIvaAPagar'   ).textContent = formatBs(fin.ivaAPagarBs));
-            dynModal.querySelector('#dynIvaRetenido' )&&(dynModal.querySelector('#dynIvaRetenido' ).textContent = formatBs(fin.retencionBs));
-            dynModal.querySelector('#dynRetenIslrBs' )&&(dynModal.querySelector('#dynRetenIslrBs' ).textContent = '- ' + formatBs(fin.retenIslrBs));
+            dynModal.querySelector('#dynIvaRetenido' )&&(dynModal.querySelector('#dynIvaRetenido' ).textContent = formatBs(fin.retencionBs + (parseFloat(cxp.RetencionIvaAbonada) || 0)));
+            dynModal.querySelector('#dynRetenIslrBs' )&&(dynModal.querySelector('#dynRetenIslrBs' ).textContent = '- ' + formatBs(fin.retenIslrBs + (parseFloat(cxp.RetencionIslrAbonada) || 0)));
             dynModal.querySelector('#dynExentoBs'    )&&(dynModal.querySelector('#dynExentoBs'    ).textContent = formatBs(fin.exentoBs));
             dynModal.querySelector('#dynRestanteBs'  )&&(dynModal.querySelector('#dynRestanteBs'  ).textContent = formatBs(fin.finalBs));
 
