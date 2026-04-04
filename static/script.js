@@ -362,9 +362,12 @@ document.addEventListener('DOMContentLoaded', () => {
             retenIslrBs = calcISLR(baseBs, (parseFloat(islrRate) || 0), cxp.CodProv, cxp.TipoPersona);
         }
 
-        const mtoTotalUsd = (window.globalRetConfig?.MontoUsdSource === 'SACOMP' && cxp.MontoMEx > 0) 
-            ? parseFloat(cxp.MontoMEx) 
-            : ((parseFloat(cxp.Monto) || 0) / historicalTasa);
+        let mtoTotalUsd = 0;
+        if (pct === 0 && window.globalRetConfig?.MontoUsdSource === 'SACOMP' && cxp.MontoMEx > 0) {
+            mtoTotalUsd = parseFloat(cxp.MontoMEx);
+        } else {
+            mtoTotalUsd = roundFixed(newMtoBs / (currentTasa > 0 ? currentTasa : 1));
+        }
 
         const totalUsdAbonado = parseFloat(cxp.TotalUsdAbonado) || 0;
         let remainingUsd = mtoTotalUsd - totalUsdAbonado;
