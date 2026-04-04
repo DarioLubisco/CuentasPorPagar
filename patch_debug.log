@@ -288,3 +288,71 @@
 [PATCH SACOMP] Affected Rows: 1
 [2026-03-30 12:12:59] numeroD=64702577 cod_prov=J- 08518977-7 payload={'FechaE': '2026-03-22', 'FechaI': '2026-03-23', 'FechaV': '2026-03-30', 'Notas10': '', 'MontoFacturaBS': 8254.01, 'TGravable': 3017.6, 'IVA': 482.82, 'Factor': 457.08, 'MontoMEx': 18.0581, 'TotalPrd': 7771.19, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 8254.01, 'CodProv': 'J- 08518977-7'}
 [PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:25:37] numeroD=B0329568 cod_prov=J-412413740 payload={'FechaE': '2026-03-28', 'FechaI': '2026-03-30', 'FechaV': '2026-04-20', 'Notas10': '1', 'MontoFacturaBS': 92459.78, 'TGravable': 13103.33, 'IVA': 2096.53, 'Factor': 471.7004, 'MontoMEx': 196.0138, 'TotalPrd': 90363.25, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 92459.78, 'CodProv': 'J-412413740'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:30:38] numeroD=B0329566 cod_prov=J-412413740 payload={'FechaE': '2026-03-28', 'FechaI': '2026-03-30', 'FechaV': '2026-04-13', 'Notas10': '', 'MontoFacturaBS': 4045.83, 'TGravable': 0, 'IVA': 0, 'Factor': 471.7004, 'MontoMEx': 8.5771, 'TotalPrd': 4045.83, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 4045.83, 'CodProv': 'J-412413740'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:33:16] numeroD=B0329570 cod_prov=J-412413740 payload={'FechaE': '2026-03-28', 'FechaI': '2026-03-30', 'FechaV': '2026-04-20', 'Notas10': '1', 'MontoFacturaBS': 54108.73, 'TGravable': 13284.5, 'IVA': 2125.52, 'Factor': 471.7004, 'MontoMEx': 114.71, 'TotalPrd': 51983.21, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 54108.73, 'Credito': 0, 'CodProv': 'J-412413740'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:33:59] numeroD=B0329570 cod_prov=J-412413740 payload={'FechaE': '2026-03-28', 'FechaI': '2026-03-30', 'FechaV': '2026-04-20', 'Notas10': '1', 'MontoFacturaBS': 54108.73, 'TGravable': 13284.5, 'IVA': 2125.52, 'Factor': 471.7004, 'MontoMEx': 114.71, 'TotalPrd': 51983.21, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 54108.73, 'CodProv': 'J-412413740'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:35:08] numeroD=B0329567 cod_prov=J-412413740 payload={'FechaE': '2026-03-28', 'FechaI': '2026-03-30', 'FechaV': '2026-04-20', 'Notas10': '', 'MontoFacturaBS': 5470.55, 'TGravable': 0, 'IVA': 0, 'Factor': 471.7004, 'MontoMEx': 11.5975, 'TotalPrd': 5470.55, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 5470.55, 'CodProv': 'J-412413740'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:40:10] numeroD=00158319 cod_prov=J-50159019-2 payload={'FechaE': '2026-03-28', 'FechaI': '2026-03-30', 'FechaV': '2026-04-14', 'Notas10': '', 'MontoFacturaBS': 51877.57, 'TGravable': 556.14, 'IVA': 88.98, 'Factor': 471.7004, 'MontoMEx': 109.9799, 'TotalPrd': 51788.59, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 51877.57, 'CodProv': 'J-50159019-2'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:48:55] numeroD=05655205 cod_prov=J-41200226-0 payload={'FechaE': '2026-03-28', 'FechaI': '2026-03-30', 'FechaV': '2026-04-06', 'Notas10': '', 'MontoFacturaBS': 3530.96, 'TGravable': 1195.76, 'IVA': 191.32, 'Factor': 471.7004, 'MontoMEx': 7.4856, 'TotalPrd': 3339.64, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 3530.96, 'CodProv': 'J-41200226-0'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:51:34] numeroD=0565206 cod_prov=J-41200226-0 payload={'FechaE': '2026-03-28', 'FechaI': '2026-03-30', 'FechaV': '2026-04-06', 'Notas10': '', 'MontoFacturaBS': 18597.63, 'TGravable': 3033.03, 'IVA': 485.29, 'Factor': 471.7004, 'MontoMEx': 39.4268, 'TotalPrd': 18112.34, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 18597.63, 'CodProv': 'J-41200226-0'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:52:25] numeroD=0565207 cod_prov=J-41200226-0 payload={'FechaE': '2026-03-30', 'FechaI': '2026-03-28', 'FechaV': '2026-04-06', 'Notas10': '', 'MontoFacturaBS': 12450.3, 'TGravable': 0, 'IVA': 0, 'Factor': 471.7004, 'MontoMEx': 26.3945, 'TotalPrd': 12450.3, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 12450.3, 'CodProv': 'J-41200226-0'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-03-30 18:53:36] numeroD=18560 cod_prov=J-41074957-1 payload={'FechaE': '2026-03-27', 'FechaI': '2026-03-30', 'FechaV': '2026-04-06', 'Notas10': '', 'MontoFacturaBS': 3899.34, 'TGravable': 0, 'IVA': 0, 'Factor': 468.5145, 'MontoMEx': 8.3228, 'TotalPrd': 3899.34, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 3899.34, 'CodProv': 'J-41074957-1'}
+[PATCH SACOMP] Affected Rows: 1
+BATCH ERROR: ('23000', "[23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Cannot insert the value NULL into column 'TipoAbono', table 'EnterpriseAdmin_AMC.dbo.CxP_Abonos'; column does not allow nulls. INSERT fails. (515) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]The statement has been terminated. (3621)")
+Traceback (most recent call last):
+  File "C:\source\CuentasPorPagar\main.py", line 765, in registrar_abonos_batch
+    cursor.execute("""
+    ~~~~~~~~~~~~~~^^^^
+        INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        tasa_orig, mto_orig
+        ^^^^^^^^^^^^^^^^^^^
+    ))
+    ^^
+pyodbc.IntegrityError: ('23000', "[23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Cannot insert the value NULL into column 'TipoAbono', table 'EnterpriseAdmin_AMC.dbo.CxP_Abonos'; column does not allow nulls. INSERT fails. (515) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]The statement has been terminated. (3621)")
+
+BATCH ERROR: ('23000', "[23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Cannot insert the value NULL into column 'TipoAbono', table 'EnterpriseAdmin_AMC.dbo.CxP_Abonos'; column does not allow nulls. INSERT fails. (515) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]The statement has been terminated. (3621)")
+Traceback (most recent call last):
+  File "C:\source\CuentasPorPagar\main.py", line 765, in registrar_abonos_batch
+    cursor.execute("""
+    ~~~~~~~~~~~~~~^^^^
+        INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        tasa_orig, mto_orig
+        ^^^^^^^^^^^^^^^^^^^
+    ))
+    ^^
+pyodbc.IntegrityError: ('23000', "[23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Cannot insert the value NULL into column 'TipoAbono', table 'EnterpriseAdmin_AMC.dbo.CxP_Abonos'; column does not allow nulls. INSERT fails. (515) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]The statement has been terminated. (3621)")
+
+BATCH ERROR: ('23000', "[23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Cannot insert the value NULL into column 'TipoAbono', table 'EnterpriseAdmin_AMC.dbo.CxP_Abonos'; column does not allow nulls. INSERT fails. (515) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]The statement has been terminated. (3621)")
+Traceback (most recent call last):
+  File "C:\source\CuentasPorPagar\main.py", line 765, in registrar_abonos_batch
+    cursor.execute("""
+    ~~~~~~~~~~~~~~^^^^
+        INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        tasa_orig, mto_orig
+        ^^^^^^^^^^^^^^^^^^^
+    ))
+    ^^
+pyodbc.IntegrityError: ('23000', "[23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Cannot insert the value NULL into column 'TipoAbono', table 'EnterpriseAdmin_AMC.dbo.CxP_Abonos'; column does not allow nulls. INSERT fails. (515) (SQLExecDirectW); [23000] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]The statement has been terminated. (3621)")
+
+[2026-04-02 15:14:51] numeroD=00108152 cod_prov=J-305007020 payload={'FechaE': '2026-04-02', 'FechaI': '2026-03-30', 'FechaV': '2026-04-14', 'Notas10': '', 'MontoFacturaBS': 15291.26, 'TGravable': 1263.4, 'IVA': 202.14, 'Factor': 474.0598, 'MontoMEx': 32.256, 'TotalPrd': 15089.12, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 15291.26, 'CodProv': 'J-305007020'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-04-03 15:31:59] numeroD=64722041 cod_prov=J- 08518977-7 payload={'FechaE': '2026-03-25', 'FechaI': '2026-03-26', 'FechaV': '2026-04-02', 'Notas10': '1', 'MontoFacturaBS': 9767.87, 'TGravable': 8420.58, 'IVA': 1347.29, 'Factor': 462.6687, 'MontoMEx': 21.112, 'TotalPrd': 8420.58, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 9767.87, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1
+[2026-04-03 17:58:13] numeroD=64547738 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-23', 'FechaI': '2026-02-23', 'FechaV': '2026-03-16', 'Notas10': '', 'MontoFacturaBS': 4218.42, 'TGravable': 0, 'IVA': 0, 'Factor': 405.3518, 'MontoMEx': 10.4068, 'TotalPrd': 4218.42, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 4218.42, 'CodProv': 'J- 08518977-7'}
+[PATCH SACOMP] Affected Rows: 1

@@ -1,4 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('--- Static Assets Version 24 Loaded ---');
     // DOM Elements
     const tableBody = document.getElementById('tableBody');
     const searchInput = document.getElementById('searchInput');
@@ -52,41 +53,92 @@ document.addEventListener('DOMContentLoaded', () => {
         MontoUsdSource: 'Calculado'
     };
 
-    // Fetch Global Config on Load
-    fetch('/api/procurement/settings')
-        .then(r => r.json())
-        .then(res => {
-            if (res && res.data) {
-                window.globalRetConfig = {
-                    ...window.globalRetConfig,
-                    ...(res.data || {})
-                };
-                
-                // Populate Settings Form
-                const settingsForm = document.getElementById('globalSettingsForm');
-                if (settingsForm) {
-                    const TasaEmisionSourceStr = window.globalRetConfig['TasaEmisionSource'] || 'DOLARTODAY';
-                    const MontoUSDSourceStr = window.globalRetConfig['MontoUSDSource'] || 'CALCULATED';
-                    const LimiteCargaStr = window.globalRetConfig['LimiteCarga'] || '';
-                    
-                    const tasaRadios = settingsForm.elements['TasaEmisionSource'];
-                    if (tasaRadios) {
-                        for (let r of tasaRadios) {
-                            if (r.value === TasaEmisionSourceStr) r.checked = true;
-                        }
-                    }
-                    const usdRadios = settingsForm.elements['MontoUSDSource'];
-                    if (usdRadios) {
-                        for (let r of usdRadios) {
-                            if (r.value === MontoUSDSourceStr) r.checked = true;
-                        }
-                    }
-                    const limiteInput = document.getElementById('settingsLimiteCarga');
-                    if(limiteInput && LimiteCargaStr) limiteInput.value = LimiteCargaStr;
+    // ── Modo Pago Múltiple ──────────────────────────────────────────────
+    window.multiPayMode = false;
+    window.multiPaySelection = new Set();     // Set<NroUnico (int)>
+    window.multiPaySelectionData = new Map(); // Map<NroUnico, item>
+
+    window.toggleMultiPayMode = () => {
+        window.multiPayMode = !window.multiPayMode;
+
+        const banner = document.getElementById('multiPayBanner');
+        const toggleBtn = document.getElementById('btnActivarModoMultiple');
+        const table = document.getElementById('cxpTable');
+
+        if (window.multiPayMode) {
+            // Activar
+            banner?.style && (banner.style.display = 'flex');
+            table?.classList.add('multi-pay-mode-active');
+            if (toggleBtn) {
+                toggleBtn.style.color = '#ef4444';
+                toggleBtn.style.borderColor = 'rgba(239,68,68,0.5)';
+                toggleBtn.innerHTML = '<i data-lucide="layers"></i> Modo Múltiple: ON';
+            }
+        } else {
+            // Desactivar: limpiar todo
+            banner?.style && (banner.style.display = 'none');
+            table?.classList.remove('multi-pay-mode-active');
+            window.multiPaySelection.clear();
+            window.multiPaySelectionData.clear();
+            // Desmarcar todos los checkboxes visibles
+            document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
+            if (toggleBtn) {
+                toggleBtn.style.color = '#10b981';
+                toggleBtn.style.borderColor = 'rgba(16,185,129,0.4)';
+                toggleBtn.innerHTML = '<i data-lucide="layers"></i> Modo Pago Múltiple';
+            }
+            recalculateSelection();
+            lucide.createIcons();
+        }
+        if (window.multiPayMode) {
+            recalculateSelection();
+            lucide.createIcons();
+        }
+    };
+
+
+    // Fetch Global Configs on Load
+    const loadConfigs = async () => {
+        try {
+            // 1. General Settings
+            const res1 = await fetch('/api/procurement/settings');
+            if (res1.ok) {
+                const json = await res1.json();
+                window.globalRetConfig = { ...window.globalRetConfig, ...(json.data || {}) };
+            }
+            // 2. Retenciones/ISLR Config (ValorUT)
+            const res2 = await fetch('/api/retenciones/config');
+            if (res2.ok) {
+                const json = await res2.json();
+                window.globalRetConfig = { ...window.globalRetConfig, ...(json.data || {}) };
+            }
+
+            // Hydrate the Global Settings Form inputs dynamically
+            const settingsForm = document.getElementById('globalSettingsForm');
+            if (settingsForm && window.globalRetConfig) {
+                const cfg = window.globalRetConfig;
+                if (cfg.TasaEmisionSource) {
+                    const r = settingsForm.querySelector(`input[name="TasaEmisionSource"][value="${cfg.TasaEmisionSource}"]`);
+                    if (r) r.checked = true;
+                }
+                if (cfg.MontoUSDSource) {
+                    const r = settingsForm.querySelector(`input[name="MontoUSDSource"][value="${cfg.MontoUSDSource}"]`);
+                    if (r) r.checked = true;
+                }
+                if (cfg.LimiteCarga != null) {
+                    const el = document.getElementById('settingsLimiteCarga');
+                    if (el) el.value = cfg.LimiteCarga;
+                }
+                if (cfg.ToleranceSaldo != null) {
+                    const el = document.getElementById('settingsToleranceSaldo');
+                    if (el) el.value = cfg.ToleranceSaldo;
                 }
             }
-        })
-        .catch(e => console.error('Failed to load global config:', e));
+        } catch (e) {
+            console.error('Failed to load global configs:', e);
+        }
+    };
+    loadConfigs();
     // Provider Modals
     const providerCondModal = document.getElementById('providerCondModal');
     const editProviderCondModal = document.getElementById('editProviderCondModal');
@@ -238,16 +290,136 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    // Utility for strict financial rounding to avoid floating point cent errors
+    const roundFixed = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
+
+    const calcISLR = (base, rate, codProv, tipoPersonaOverride) => {
+        if (!rate || rate <= 0) return 0;
+        let isNatural = false;
+        if (tipoPersonaOverride === 'PJ') {
+            isNatural = false;
+        } else if (tipoPersonaOverride === 'PN') {
+            isNatural = true;
+        } else if (codProv) {
+            const firstChar = String(codProv).trim().toUpperCase().charAt(0);
+            isNatural = (firstChar === 'V' || firstChar === 'E' || firstChar === 'P');
+        }
+
+        const ut = parseFloat(window.globalRetConfig?.ValorUT) || 9.00;
+        let ret = base * rate;
+        if (isNatural) {
+            const sustraendo = rate * ut * 83.3334;
+            ret = Math.max(0, ret - sustraendo);
+        }
+        return roundFixed(ret);
+    };
+
+    const calculateInvoiceFinancials = (cxp, { tasaDia, aplicaIndex, pctDesc, islrRate }) => {
+        const historicalTasa = (cxp.Factor && cxp.Factor > 0 && window.globalRetConfig?.TasaEmisionSource === 'SACOMP') 
+            ? parseFloat(cxp.Factor) 
+            : parseFloat(cxp.TasaEmision) || 1;
+
+        const currentTasa = (aplicaIndex && tasaDia > 0) ? tasaDia : historicalTasa;
+
+        const tGravableUsd = roundFixed((parseFloat(cxp.TGravable) || 0) / historicalTasa);
+        const exentoOrigBs = Math.max(0, (parseFloat(cxp.Monto) || 0) - (parseFloat(cxp.TGravable) || 0) - (parseFloat(cxp.MtoTax) || 0));
+        const exentoUsd = roundFixed(exentoOrigBs / historicalTasa);
+
+        let baseBs, exentoBs;
+
+        if (aplicaIndex) {
+            baseBs   = roundFixed(tGravableUsd * currentTasa);
+            exentoBs = roundFixed(exentoUsd * currentTasa);
+        } else {
+            baseBs   = roundFixed(parseFloat(cxp.TGravable) || 0);
+            exentoBs = roundFixed(exentoOrigBs);
+        }
+
+        const pct = parseFloat(pctDesc) || 0;
+        if (pct > 0) {
+            const fDescuento = (1 - (pct / 100.0));
+            baseBs   = roundFixed(baseBs * fDescuento);
+            exentoBs = roundFixed(exentoBs * fDescuento);
+        }
+
+        const ivaBs    = roundFixed(baseBs * 0.16);
+        const newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
+
+        const isReten = String(cxp.EsReten) === '1' || cxp.EsReten === true;
+        let porctRet  = parseFloat(cxp.PorctRet) || 0;
+        if (isReten && porctRet === 0) porctRet = 75; 
+
+        const ret_iva_abonada = parseFloat(cxp.RetencionIvaAbonada) || 0;
+        const ret_islr_abonada = parseFloat(cxp.RetencionIslrAbonada) || 0;
+
+        const retencionBs = (isReten && ret_iva_abonada === 0) ? roundFixed(ivaBs * (porctRet / 100.0)) : 0;
+        
+        let ivaAPagarBs = roundFixed(ivaBs - retencionBs - ret_iva_abonada);
+        if (ivaAPagarBs < 0) ivaAPagarBs = 0;
+        
+        let retenIslrBs = 0;
+        if (ret_islr_abonada === 0) {
+            retenIslrBs = calcISLR(baseBs, (parseFloat(islrRate) || 0), cxp.CodProv, cxp.TipoPersona);
+        }
+
+        const totalAbonado = parseFloat(cxp.TotalBsAbonado) || 0;
+        const saldoTargetBs = roundFixed(newMtoBs - totalAbonado);
+        
+        let finalBs = roundFixed(saldoTargetBs - retencionBs - retenIslrBs);
+        if (finalBs < 0) finalBs = 0;
+
+        const equivUsd = currentTasa > 0 ? (finalBs / currentTasa) : 0;
+        
+        const mtoTotalUsd = (window.globalRetConfig?.MontoUsdSource === 'SACOMP' && cxp.MontoMEx > 0) 
+            ? parseFloat(cxp.MontoMEx) 
+            : ((cxp.Monto || 0) / historicalTasa);
+            
+        let descUsdMonto = 0;
+        if(pct > 0) {
+           descUsdMonto = roundFixed(mtoTotalUsd * (pct / 100.0));
+        }
+
+        return {
+            historicalTasa,
+            currentTasa,
+            baseBs,
+            exentoBs,
+            ivaBs,
+            retencionBs,
+            ivaAPagarBs,
+            retenIslrBs,
+            saldoTargetBs,
+            finalBs,
+            equivUsd,
+            descUsdMonto,
+            mtoTotalUsd,
+            subtotalUsd: (parseFloat(cxp.TotalPrd) || 0) / historicalTasa,
+            fletesUsd: (parseFloat(cxp.Fletes) || 0) / historicalTasa,
+            d1Usd: (parseFloat(cxp.Descto1) || 0) / historicalTasa,
+            d2Usd: (parseFloat(cxp.Descto2) || 0) / historicalTasa,
+            ivaUsd: currentTasa > 0 ? (ivaBs / currentTasa) : 0
+        };
+    };
+
     // Determine status based on dates, balances and planned status
     const getBaseStatus = (item) => {
-        // Use ONLY the invoice's SAACXP.Saldo to determine paid status.
-        // SaldoAct is the provider's overall balance, so we ignore it here.
-        const efectivSaldo = parseFloat(item.Saldo) || 0;
-        if (efectivSaldo <= 0.01) return 'Pagado';
+        const tasaAct = parseFloat(item.TasaActual) || 1;
+        const tasaEmi = parseFloat(item.TasaEmision) || 1;
+        
+        // We assume indexation applies if today's rate is higher than emission
+        const indexado = tasaAct > tasaEmi;
 
-        const abonos = parseFloat(item.TotalBsAbonado) || 0;
-        const monto  = parseFloat(item.Monto) || 0;
-        if (monto > 0 && abonos >= (monto - 0.01)) return 'Pagado';
+        const fin = calculateInvoiceFinancials(item, {
+            tasaDia: tasaAct,
+            aplicaIndex: indexado,
+            pctDesc: 0,
+            islrRate: 0
+        });
+
+        const tolerance = parseFloat(window.globalRetConfig?.ToleranceSaldo) || 0.50;
+        if (fin.finalBs <= tolerance) {
+            return 'Pagado';
+        }
 
         const now   = new Date();
         const vDate = new Date(item.FechaV);
@@ -314,49 +486,74 @@ document.addEventListener('DOMContentLoaded', () => {
         let selBs = 0;
         let selUsd = 0;
 
-        selectedCheckboxes.forEach(cb => {
-            const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
-            const item = window.currentData.find(d => d.NroUnico === nroUnico);
-            if (item) {
+        if (window.multiPayMode) {
+            // En modo múltiple: calcular desde el Set completo (incluye facturas fuera de vista)
+            window.multiPaySelectionData.forEach(item => {
                 const saldo = parseFloat(item.Saldo) || 0;
-                // Calculate USD and updated Bs
                 const tasaEmi = parseFloat(item.TasaEmision) || 1;
                 const tasaAct = parseFloat(item.TasaActual) || 1;
-                const montoUsd = saldo / tasaEmi;
-                const saldoActualizadoBs = montoUsd * tasaAct;
-
-                selBs += saldoActualizadoBs;
-                selUsd += montoUsd;
-            }
-        });
+                selBs += (saldo / tasaEmi) * tasaAct;
+                selUsd += saldo / tasaEmi;
+            });
+        } else {
+            selectedCheckboxes.forEach(cb => {
+                const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
+                const item = window.currentData.find(d => d.NroUnico === nroUnico);
+                if (item) {
+                    const saldo = parseFloat(item.Saldo) || 0;
+                    const tasaEmi = parseFloat(item.TasaEmision) || 1;
+                    const tasaAct = parseFloat(item.TasaActual) || 1;
+                    selBs += (saldo / tasaEmi) * tasaAct;
+                    selUsd += saldo / tasaEmi;
+                }
+            });
+        }
 
         selectedTotalBsStr.textContent = formatBs(selBs);
         selectedTotalUsdStr.textContent = usdFormatter(selUsd);
 
+        // Cuenta efectiva para mostrar controles
+        const effectiveCount = window.multiPayMode
+            ? window.multiPaySelection.size
+            : selectedCheckboxes.length;
+
         // Show/hide action bar
         const editInvoiceBtn = document.getElementById('editInvoiceBtn');
-        if (selectedCheckboxes.length > 0) {
+        if (effectiveCount > 0) {
             planningActionBar.style.display = 'flex';
         } else {
             planningActionBar.style.display = 'none';
         }
-        // Show edit button only when exactly 1 row selected
+        // Show edit button only when exactly 1 row selected (solo modo normal)
         if (editInvoiceBtn) {
-            editInvoiceBtn.style.display = selectedCheckboxes.length === 1 ? 'inline-flex' : 'none';
+            editInvoiceBtn.style.display = (!window.multiPayMode && selectedCheckboxes.length === 1) ? 'inline-flex' : 'none';
         }
 
         const btnGenerarRetencion = document.getElementById('btnGenerarRetencion');
         if (btnGenerarRetencion) {
-            btnGenerarRetencion.style.display = selectedCheckboxes.length >= 1 ? 'inline-flex' : 'none';
+            btnGenerarRetencion.style.display = effectiveCount >= 1 ? 'inline-flex' : 'none';
+        }
+
+        const btnGenerarRetencionIslr = document.getElementById('btnGenerarRetencionIslr');
+        if (btnGenerarRetencionIslr) {
+            btnGenerarRetencionIslr.style.display = effectiveCount >= 1 ? 'inline-flex' : 'none';
         }
 
         const btnPagoMultiple = document.getElementById('btnPagoMultiple');
         if (btnPagoMultiple) {
-            btnPagoMultiple.style.display = selectedCheckboxes.length >= 2 ? 'inline-flex' : 'none';
+            btnPagoMultiple.style.display = effectiveCount >= 2 ? 'inline-flex' : 'none';
         }
 
-        // Update 'Select All' state
-        selectAllCheckbox.checked = selectedCheckboxes.length === document.querySelectorAll('.row-checkbox').length && window.currentData.length > 0;
+        // Actualizar banner de modo múltiple
+        const banner = document.getElementById('multiPayBanner');
+        if (banner && window.multiPayMode) {
+            document.getElementById('multiPayCount').textContent = window.multiPaySelection.size;
+            document.getElementById('multiPayTotalUsd').textContent = usdFormatter(selUsd);
+        }
+
+        // Update 'Select All' state (solo aplica a filas visibles)
+        const allVisible = document.querySelectorAll('.row-checkbox').length;
+        selectAllCheckbox.checked = allVisible > 0 && selectedCheckboxes.length === allVisible;
     };
 
     window.renderTable = () => {
@@ -456,8 +653,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             <button class="btn-icon" title="Gestionar Abonos" onclick="openAbonosPanel('${item.CodProv}', '${item.NumeroD}')">
                                 <i data-lucide="calculator" size="16"></i>
                             </button>
-                            <button class="btn-icon" title="Generar Retenci&#243;n" onclick="openRetencionFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#eab308;">
+                            <button class="btn-icon" title="Generar Retenci&#243;n IVA" onclick="openRetencionFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#eab308;">
                                 <i data-lucide="receipt" size="16"></i>
+                            </button>
+                            <button class="btn-icon" title="Generar Retenci&#243;n ISLR" onclick="openRetencionIslrFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#ef4444;">
+                                <i data-lucide="file-text" size="16"></i>
                             </button>
                             <button class="btn-icon" title="Nota de Cr&#233;dito" onclick="openNCFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#10b981;">
                                 <i data-lucide="file-plus" size="16"></i>
@@ -480,10 +680,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Attach listeners to checkboxes
         document.querySelectorAll('.row-checkbox').forEach(cb => {
-            cb.addEventListener('change', recalculateSelection);
+            const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
+
+            // Restaurar estado desde el Set si está en modo múltiple
+            if (window.multiPayMode && window.multiPaySelection.has(nroUnico)) {
+                cb.checked = true;
+            }
+
+            cb.addEventListener('change', () => {
+                if (window.multiPayMode) {
+                    if (cb.checked) {
+                        window.multiPaySelection.add(nroUnico);
+                        const item = window.currentData.find(d => d.NroUnico === nroUnico);
+                        if (item) window.multiPaySelectionData.set(nroUnico, item);
+                    } else {
+                        window.multiPaySelection.delete(nroUnico);
+                        window.multiPaySelectionData.delete(nroUnico);
+                    }
+                }
+                recalculateSelection();
+            });
         });
 
-        // Reset selection state
         recalculateSelection();
     };
 
@@ -499,7 +717,28 @@ document.addEventListener('DOMContentLoaded', () => {
         fetchCashflow();
     });
 
-    document.getElementById('filterStatusBase')?.addEventListener('change', window.renderTable);
+    document.getElementById('filterStatusBase')?.addEventListener('change', (e) => {
+        if (e.target.value === 'TODOS_ACTIVOS') {
+            if (window.currentData) {
+                window.currentData.sort((a, b) => {
+                    let valA = a['FechaV'] ? String(a['FechaV']).toLowerCase() : '';
+                    let valB = b['FechaV'] ? String(b['FechaV']).toLowerCase() : '';
+                    if (valA < valB) return -1;
+                    if (valA > valB) return 1;
+                    return 0;
+                });
+                const headerCell = document.querySelector('#cxpTable th.sortable[data-sort="FechaV"]');
+                if (headerCell) {
+                    document.querySelectorAll('#cxpTable th.sortable .sort-icon').forEach(icon => {
+                        icon.classList.remove('active', 'desc');
+                    });
+                    const icon = headerCell.querySelector('.sort-icon');
+                    if (icon) icon.classList.add('active');
+                }
+            }
+        }
+        window.renderTable();
+    });
     document.getElementById('filterAttrPlanificado')?.addEventListener('change', window.renderTable);
     document.getElementById('filterAttrAbonos')?.addEventListener('change', window.renderTable);
     document.getElementById('filterAttrRetenciones')?.addEventListener('change', window.renderTable);
@@ -532,6 +771,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     cancelPlanBtn.addEventListener('click', () => {
         document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
+        if (window.multiPayMode) {
+            window.multiPaySelection.clear();
+            window.multiPaySelectionData.clear();
+        }
         recalculateSelection();
     });
 
@@ -828,9 +1071,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const selected = getSelectedDebitNotes();
         if (selected.length === 0) return;
 
-        document.getElementById('dnInputNumero').value = '';
+        document.getElementById('regNdInputNumero').value = '';
+        document.getElementById('regNdInputControl').value = '';
 
-        const listContainer = document.getElementById('dnSelectedInvoicesList');
+        const listContainer = document.getElementById('regNdFacturasContainer');
         if (listContainer) {
             listContainer.innerHTML = selected.map((s, idx) => `
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
@@ -855,8 +1099,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('registerDebitNoteForm')?.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const num = document.getElementById('dnInputNumero').value.trim();
-        if (!num) return;
+        const num = document.getElementById('regNdInputNumero').value.trim();
+        const ctrl = document.getElementById('regNdInputControl').value.trim();
+        if (!num || !ctrl) return;
 
         const selected = getSelectedDebitNotes();
         if (selected.length === 0) return;
@@ -878,7 +1123,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('/api/procurement/debit-notes/register', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ Invoices: selected, NotaDebitoID: num })
+                body: JSON.stringify({ Invoices: selected, NotaDebitoID: num, ControlID: ctrl })
             });
             if (!res.ok) throw new Error("Error al registrar");
             closeRegisterDebitNoteModal();
@@ -2088,8 +2333,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const params = JSON.parse(localStorage.getItem('cashflowParams') || '{}');
             const cajaUsd = params.cajaUsd || 0;
             const cajaBs = params.cajaBs || 0;
-            const fechaArranque = params.fechaArranque || new Date().toISOString().slice(0, 10);
-            const res = await fetch(`/api/reports/forecast-consolidated?fecha_arranque=${encodeURIComponent(fechaArranque)}&caja_usd=${cajaUsd}&caja_bs=${cajaBs}`);
+            const fechaArranque = params.fechaCero || new Date().toISOString().slice(0, 10);
+            const delayDays = params.toggleDelay ? (params.retardoDays || 1) : 0;
+            const res = await fetch(`/api/reports/forecast-consolidated?fecha_arranque=${encodeURIComponent(fechaArranque)}&caja_usd=${cajaUsd}&caja_bs=${cajaBs}&delay_days=${delayDays}`);
             if (!res.ok) return;
             const { data } = await res.json();
             window.batchCashflowMap = {};
@@ -2185,6 +2431,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${p.DiasNoIndexacion}</td>
                 <td>${p.DiasVencimiento}</td>
                 <td>${p.Email || '-'}</td>
+                <td><span class="status-badge" style="background:var(--bg-secondary);">${p.TipoPersona || 'Auto'}</span></td>
                 <td>${p.ProntoPago1_Pct}% (${p.ProntoPago1_Dias}d)</td>
                 <td>${p.ProntoPago2_Pct}% (${p.ProntoPago2_Dias}d)</td>
                 <td>
@@ -2211,6 +2458,9 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('editProvPP2Pct').value = p.ProntoPago2_Pct;
         document.getElementById('editProvPP2Dias').value = p.ProntoPago2_Dias;
         document.getElementById('editProvEmail').value = p.Email || '';
+        // TipoPersona: show local override ('' = auto from Saint)
+        const tpSel = document.getElementById('editProvTipoPersona');
+        if (tpSel) tpSel.value = (p.TipoPersonaLocal || '').trim();
 
         editProviderCondModal.classList.add('active');
     };
@@ -2228,7 +2478,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 ProntoPago1_Dias: parseInt(document.getElementById('editProvPP1Dias').value) || 0,
                 ProntoPago2_Pct: parseFloat(document.getElementById('editProvPP2Pct').value) || 0,
                 ProntoPago2_Dias: parseInt(document.getElementById('editProvPP2Dias').value) || 0,
-                Email: document.getElementById('editProvEmail').value || null
+                Email: document.getElementById('editProvEmail').value || null,
+                TipoPersona: document.getElementById('editProvTipoPersona')?.value || null
             };
 
             const btn = editProvForm.querySelector('button[type="submit"]');
@@ -2237,14 +2488,27 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.disabled = true;
 
             try {
-                const res = await fetch(`/api/procurement/providers/${codProv}`, {
+                const res = await fetch(`/api/procurement/providers/${encodeURIComponent(codProv)}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                if (!res.ok) throw new Error('Error al guardar parametrización');
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Error al guardar parametrización');
+                }
                 closeEditProviderModal();
-                fetchProviders(); // Refresh list
+                fetchProviders(); // Refresh config list
+
+                // Update type in current data cache if it exists
+                if (window.currentData) {
+                    window.currentData.forEach(item => {
+                        if (item.CodProv === codProv) {
+                            item.TipoPersona = payload.TipoPersona; 
+                        }
+                    });
+                    if (typeof fetchData === 'function') await fetchData();
+                }
             } catch (error) {
                 console.error(error);
                 alert('Error al guardar condiciones.');
@@ -2355,6 +2619,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const json = await res.json();
             currentCxpStatus = json.data;
             renderCxpStatus();
+            // Restore previously saved ISLR concept for this invoice
+            const savedIslr = localStorage.getItem(`islr_${numeroD}`);
+            const islrSel = document.getElementById('abConceptoISLR');
+            if (savedIslr && islrSel) {
+                islrSel.value = savedIslr;
+            }
         } catch (error) {
             console.error('Error fetching cxp status:', error);
             alert('Error al cargar datos de la factura.');
@@ -2395,7 +2665,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Use the official expiration date from SAACXP instead of the calculated one
         abFechaV.textContent = formatDate(d.FechaVSaint || d.FechaV_Calculada);
 
-        abSaldoUsd.textContent = usdFormatter(d.SaldoRestanteUSD);
+        // UI bound dynamically in fillDefaultPaymentAmount, but we set a placeholder here
+        abSaldoUsd.textContent = '...';
 
         const abTipoDescuento = document.getElementById('abTipoDescuento');
         if (abTipoDescuento) {
@@ -2434,11 +2705,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td>${a.AplicaIndexacion ? '<span class="status-badge status-overdue">Sí</span>' : '<span class="status-badge status-paid">No</span>'}</td>
                     <td class="amount us-amount">${usdFormatter(a.MontoUsdAbonado)}</td>
                     <td>${a.Referencia || '-'}</td>
+                    <td style="text-align:center;">
+                        ${!['RETENCION_IVA', 'RETENCION_ISLR', 'NOTA_CREDITO'].includes(a.TipoAbono) ? `<button class="btn-icon" title="Anular Abono" onclick="anularAbonoCxp(${a.AbonoID}, '${d.CodProv}', '${d.NumeroD}')"><i data-lucide="trash-2" style="color:var(--danger);width:16px;"></i></button>` : `<span style="font-size:0.75rem;color:var(--text-secondary)" title="Anule desde el Módulo Respectivo">Auto.</span>`}
+                    </td>
                 </tr>
             `).join('');
         } else {
-            abonosHistoryBody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-secondary);">No hay abonos registrados.</td></tr>`;
+            abonosHistoryBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">No hay abonos registrados.</td></tr>`;
         }
+        
+        lucide.createIcons();
+
+        window.anularAbonoCxp = async (abonoId, codProv, numeroD) => {
+            if (!confirm("¿Está seguro de eliminar este abono? Esta acción restaurará el saldo asociado.")) return;
+            try {
+                const res = await fetch(`/api/procurement/abonos/${abonoId}`, { method: 'DELETE' });
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    let errMsg = errorText;
+                    try { const j = JSON.parse(errorText); if(j.detail) errMsg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail); } catch(e){}
+                    throw new Error(errMsg);
+                }
+                showToast("Abono eliminado exitosamente", "success");
+                await fetchCxpStatus(codProv, numeroD);
+                if (typeof fetchData === 'function') fetchData(); // Refresh external table
+            } catch(e) {
+                showToast("Error al anular: " + e.message, "danger");
+            }
+        };
 
         // Show tasa for the invoice's BASE DATE (Emisión or Entrega) in the badge
         const baseDateStr = d.BaseDiasCredito === 'EMISION'
@@ -2505,8 +2799,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const dynamicInvoiceStatusModal = document.getElementById('dynamicInvoiceStatusModal');
     window.closeDynamicInvoiceStatusModal = () => dynamicInvoiceStatusModal?.classList.remove('active');
 
-    // Utility for strict financial rounding to avoid floating point cent errors
-    const roundFixed = (num) => Math.round((num + Number.EPSILON) * 100) / 100;
 
     document.getElementById('btnDynamicInvoiceStatus')?.addEventListener('click', () => {
         if (!currentCxpStatus) {
@@ -2520,14 +2812,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        const historicalTasa = (d.Factor && d.Factor > 0 && window.globalRetConfig?.TasaEmisionSource === 'SACOMP') 
-            ? parseFloat(d.Factor) 
-            : parseFloat(d.TasaEmision) || 1;
-
-        let mtoTotalUsd = (window.globalRetConfig?.MontoUsdSource === 'SACOMP' && d.MontoMEx > 0) 
-            ? parseFloat(d.MontoMEx) 
-            : ((d.Monto || 0) / historicalTasa);
-
         let pctDescuento = 0;
         const abProntoPago = document.getElementById('abProntoPago');
         const abTipoDescuento = document.getElementById('abTipoDescuento');
@@ -2535,88 +2819,54 @@ document.addEventListener('DOMContentLoaded', () => {
             pctDescuento = parseFloat(abTipoDescuento.value) || 0;
         }
 
-        let subtotalUsd = (d.TotalPrd || 0) / historicalTasa;
-        let fletesUsd = (d.Fletes || 0) / historicalTasa;
-        let d1Usd = (d.Descto1 || 0) / historicalTasa;
-        let d2Usd = (d.Descto2 || 0) / historicalTasa;
-        
+        const selIslrModal = document.getElementById('abConceptoISLR');
+        const islrRateModal = parseFloat(selIslrModal?.value) || 0;
         const aplicaIndex = abAplicaIndex?.checked || false;
-        const currentTasa = aplicaIndex ? (parseFloat(abTasa.value) || historicalTasa) : historicalTasa;
 
-        // Phase 21: High precision USD (Matches Excel Sheet1)
-        let tGravableUsd = (parseFloat(d.TGravable) || 0) / historicalTasa;
-        let exentoOrigBs = Math.max(0, (parseFloat(d.Monto) || 0) - (parseFloat(d.TGravable) || 0) - (parseFloat(d.MtoTax) || 0));
-        let exentoUsd = exentoOrigBs / historicalTasa;
-
-        let newBaseBs = 0, newIvaBs = 0, newExentoBs = 0, newMtoBs = 0;
-
-        if (aplicaIndex) {
-            newBaseBs = roundFixed(tGravableUsd * currentTasa);
-            newExentoBs = roundFixed(exentoUsd * currentTasa);
-        } else {
-            newBaseBs = roundFixed(parseFloat(d.TGravable) || 0);
-            newExentoBs = roundFixed(exentoOrigBs);
-        }
+        const fin = calculateInvoiceFinancials(d, {
+            tasaDia: tasaDia,
+            aplicaIndex: aplicaIndex,
+            pctDesc: pctDescuento,
+            islrRate: islrRateModal
+        });
 
         if (pctDescuento > 0) {
-            const fDescuento = (1 - (pctDescuento / 100.0));
-            newBaseBs = roundFixed(newBaseBs * fDescuento);
-            newExentoBs = roundFixed(newExentoBs * fDescuento);
-        }
-
-        newIvaBs = roundFixed(newBaseBs * 0.16);
-        newMtoBs = roundFixed(newBaseBs + newIvaBs + newExentoBs);
-
-        const isReten = d.EsReten == 1 || d.EsReten === true || String(d.EsReten) === '1';
-        let porctRet = parseFloat(d.PorctRet) || 0;
-        if (isReten && porctRet === 0) porctRet = 75; 
-        
-        const newRetencionBs = isReten ? roundFixed(newIvaBs * (porctRet / 100.0)) : 0;
-        const newIvaAPagarBs = roundFixed(newIvaBs - newRetencionBs);
-        // Phase 20: newTotalBs correctly references newMtoBs (which considers indexation)
-        const newTotalBs = roundFixed(newMtoBs - (parseFloat(d.TotalBsAbonado) || 0));
-        let newRestanteBs = roundFixed(newTotalBs - newRetencionBs);
-        
-        let descuentoUsd = 0;
-        if (pctDescuento > 0) {
-            descuentoUsd = roundFixed(mtoTotalUsd * (pctDescuento / 100.0));
             const dynDescuentoBox = document.getElementById('dynDescuentoBox');
             if (dynDescuentoBox) {
                 dynDescuentoBox.style.display = 'flex';
                 document.getElementById('dynPctDesc').textContent = pctDescuento;
-                document.getElementById('dynMontoDescUsd').textContent = '-' + usdFormatter(descuentoUsd);
+                document.getElementById('dynMontoDescUsd').textContent = '-' + usdFormatter(fin.descUsdMonto);
             }
         } else {
             const dynDescuentoBox = document.getElementById('dynDescuentoBox');
             if (dynDescuentoBox) dynDescuentoBox.style.display = 'none';
         }
         
-        ivaUsd = (newIvaBs / currentTasa);
-        
         // UI Updates
-        document.getElementById('dynTasaBcv').textContent = formatBs(currentTasa);
-        document.getElementById('dynSubtotalUsd').textContent = usdFormatter(subtotalUsd);
-        document.getElementById('dynMtoTotalUsd').textContent = usdFormatter(mtoTotalUsd);
+        document.getElementById('dynTasaBcv').textContent = formatBs(fin.currentTasa);
+        document.getElementById('dynSubtotalUsd').textContent = usdFormatter(fin.subtotalUsd);
+        document.getElementById('dynMtoTotalUsd').textContent = usdFormatter(fin.mtoTotalUsd);
         
         // Conditionally show Fletes/Desctos
         let desctoFletesHtml = '';
-        if (fletesUsd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(+) Fletes:</span> <span>${usdFormatter(fletesUsd)}</span></div>`;
-        if (d1Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 1:</span> <span style="color:var(--danger);">${usdFormatter(d1Usd)}</span></div>`;
-        if (d2Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 2:</span> <span style="color:var(--danger);">${usdFormatter(d2Usd)}</span></div>`;
+        if (fin.fletesUsd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(+) Fletes:</span> <span>${usdFormatter(fin.fletesUsd)}</span></div>`;
+        if (fin.d1Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 1:</span> <span style="color:var(--danger);">${usdFormatter(fin.d1Usd)}</span></div>`;
+        if (fin.d2Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 2:</span> <span style="color:var(--danger);">${usdFormatter(fin.d2Usd)}</span></div>`;
         document.getElementById('dynDesctoFletesBox').innerHTML = desctoFletesHtml;
 
-        document.getElementById('dynBaseBs').textContent = formatBs(newBaseBs);
-        document.getElementById('dynIvaUsd').textContent = usdFormatter(aplicaIndex ? ivaUsd : roundFixed(newIvaBs / currentTasa));
+        document.getElementById('dynBaseBs').textContent = formatBs(fin.baseBs);
+        document.getElementById('dynIvaUsd').textContent = usdFormatter(aplicaIndex ? fin.ivaUsd : roundFixed(fin.ivaBs / fin.currentTasa));
         
         // New IVA breakdown layout
-        document.getElementById('dynIvaBs').textContent = formatBs(newIvaBs);
-        if(document.getElementById('dynIvaAPagar')) document.getElementById('dynIvaAPagar').textContent = formatBs(newIvaAPagarBs);
-        if(document.getElementById('dynIvaRetenido')) document.getElementById('dynIvaRetenido').textContent = formatBs(newRetencionBs);
+        document.getElementById('dynIvaBs').textContent = formatBs(fin.ivaBs);
+        if(document.getElementById('dynIvaAPagar')) document.getElementById('dynIvaAPagar').textContent = formatBs(fin.ivaAPagarBs);
+        if(document.getElementById('dynIvaRetenido')) document.getElementById('dynIvaRetenido').textContent = formatBs(fin.retencionBs);
+        if(document.getElementById('dynRetenIslrBs')) document.getElementById('dynRetenIslrBs').textContent = '- ' + formatBs(fin.retenIslrBs);
 
-        document.getElementById('dynExentoBs').textContent = formatBs(newExentoBs);
+        document.getElementById('dynExentoBs').textContent = formatBs(fin.exentoBs);
         
         // Final total payable
-        document.getElementById('dynRestanteBs').textContent = formatBs(newRestanteBs);
+        document.getElementById('dynRestanteBs').textContent = formatBs(fin.finalBs);
 
         dynamicInvoiceStatusModal?.classList.add('active');
         lucide.createIcons();
@@ -2644,24 +2894,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const d = currentCxpStatus;
         const aplicaIndexacion = abAplicaIndex.checked;
         const tasaActual = parseFloat(abTasa.value) || 0;
-        const historicalTasa = parseFloat(d.TasaEmision) || 1;
-        const tasa = (aplicaIndexacion && tasaActual > 0) ? tasaActual : historicalTasa;
-
-        let baseBs = 0, ivaBs = 0, exentoBs = 0, newMtoBs = 0;
-
-        // Phase 21: High precision USD (Matches Excel Sheet1)
-        let tGravableUsd = (parseFloat(d.TGravable) || 0) / historicalTasa;
-        let exentoOrigBs = Math.max(0, (parseFloat(d.Monto) || 0) - (parseFloat(d.TGravable) || 0) - (parseFloat(d.MtoTax) || 0));
-        let exentoUsd = exentoOrigBs / historicalTasa;
-
-        if (aplicaIndexacion) {
-            baseBs = roundFixed(tGravableUsd * tasa);
-            exentoBs = roundFixed(exentoUsd * tasa);
-        } else {
-            // Phase 13: STRICT original BS values from DB
-            baseBs = roundFixed(parseFloat(d.TGravable) || 0);
-            exentoBs = roundFixed(exentoOrigBs);
-        }
         
         let pctDescuento = 0;
         const abProntoPago = document.getElementById('abProntoPago');
@@ -2670,32 +2902,26 @@ document.addEventListener('DOMContentLoaded', () => {
             pctDescuento = parseFloat(abTipoDescuento.value) || 0;
         }
 
-        if (pctDescuento > 0) {
-            const fDescuento = (1 - (pctDescuento / 100.0));
-            baseBs = roundFixed(baseBs * fDescuento);
-            exentoBs = roundFixed(exentoBs * fDescuento);
+        const selIslr = document.getElementById('abConceptoISLR');
+        const islrRate = parseFloat(selIslr?.value) || 0;
+
+        const fin = calculateInvoiceFinancials(d, {
+            tasaDia: tasaActual,
+            aplicaIndex: aplicaIndexacion,
+            pctDesc: pctDescuento,
+            islrRate: islrRate
+        });
+
+        // Update new UI fields
+        if(document.getElementById('abIvaAPagarBs')) document.getElementById('abIvaAPagarBs').value = formatBs(fin.ivaAPagarBs);
+        if(document.getElementById('abRetenIslrBs')) document.getElementById('abRetenIslrBs').value = formatBs(fin.retenIslrBs);
+
+        // Re-calculate the visual "Saldo Restante USD" explicitly from the central math engine
+        if (document.getElementById('abSaldoUsd')) {
+            document.getElementById('abSaldoUsd').textContent = usdFormatter(fin.equivUsd);
         }
 
-        ivaBs = roundFixed(baseBs * 0.16);
-        newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
-        
-        const isReten = String(d.EsReten) === '1' || d.EsReten === true;
-        let retencionBs = 0;
-        if (isReten) {
-            let porctRet = parseFloat(d.PorctRet) || 0;
-            if (porctRet === 0) porctRet = 75;
-            retencionBs = roundFixed(ivaBs * (porctRet / 100.0));
-        }
-
-        // Base Target Amount (Gross Remaining Saldo)
-        let saldoTargetBs = roundFixed(newMtoBs - (parseFloat(d.TotalBsAbonado) || 0));
-
-        // Suggested final amount subtracts un-emitted retentions from the active saldo
-        let finalBs = roundFixed(saldoTargetBs - retencionBs);
-        
-        if (finalBs < 0) finalBs = 0;
-        
-        let targetBs = finalBs.toFixed(2);
+        let targetBs = fin.finalBs.toFixed(2);
 
         const currentMonto = abMontoBs.value;
         if (!forceUserToggle) {
@@ -2744,6 +2970,13 @@ document.addEventListener('DOMContentLoaded', () => {
         calculateUsdAmount();
     });
     abTipoDescuento?.addEventListener('change', () => {
+        fillDefaultPaymentAmount(true);
+        calculateUsdAmount();
+    });
+    document.getElementById('abConceptoISLR')?.addEventListener('change', () => {
+        // Persist concept per invoice in localStorage
+        const numD = document.getElementById('abNumeroD')?.value;
+        if (numD) localStorage.setItem(`islr_${numD}`, document.getElementById('abConceptoISLR').value);
         fillDefaultPaymentAmount(true);
         calculateUsdAmount();
     });
@@ -3093,61 +3326,79 @@ document.addEventListener('DOMContentLoaded', () => {
             const indexado  = row.querySelector('.pm-indexado')?.checked;
             const prontoPago= row.querySelector('.pm-pronto-pago')?.checked;
             const pctDesc   = prontoPago ? (parseFloat(row.querySelector('.pm-desc')?.value) || 0) : 0;
+            const islrRate = parseFloat(row.querySelector('.pm-islr-concept')?.value) || 0;
 
-            const tGravableUsd  = (parseFloat(cxp.TGravable) || 0) / historicalTasa;
-            const exentoOrigBs  = Math.max(0,
-                (parseFloat(cxp.Monto) || 0) - (parseFloat(cxp.TGravable) || 0) - (parseFloat(cxp.MtoTax) || 0));
-            const exentoUsd     = exentoOrigBs / historicalTasa;
+            const fin = calculateInvoiceFinancials(cxp, {
+                tasaDia: tasaDia,
+                aplicaIndex: indexado,
+                pctDesc: pctDesc,
+                islrRate: islrRate
+            });
 
-            const currentTasa   = (indexado && tasaDia > 0) ? tasaDia : historicalTasa;
-            let baseBs, exentoBs;
-            if (indexado) {
-                baseBs   = roundFixed(tGravableUsd  * currentTasa);
-                exentoBs = roundFixed(exentoUsd     * currentTasa);
-            } else {
-                baseBs   = roundFixed(parseFloat(cxp.TGravable) || 0);
-                exentoBs = roundFixed(exentoOrigBs);
-            }
+            // Update row hidden labels for Global Summary
+            if(row.querySelector('.pm-base-bs'))       row.querySelector('.pm-base-bs').textContent       = fin.baseBs.toFixed(2);
+            if(row.querySelector('.pm-iva-bs'))        row.querySelector('.pm-iva-bs').textContent        = fin.ivaBs.toFixed(2);
+            if(row.querySelector('.pm-iva-apagar-bs')) row.querySelector('.pm-iva-apagar-bs').textContent = fin.ivaAPagarBs.toFixed(2);
+            if(row.querySelector('.pm-exento-bs'))     row.querySelector('.pm-exento-bs').textContent     = fin.exentoBs.toFixed(2);
+            if(row.querySelector('.pm-retiva-bs'))     row.querySelector('.pm-retiva-bs').textContent     = fin.retencionBs.toFixed(2);
+            if(row.querySelector('.pm-retislr-bs'))    row.querySelector('.pm-retislr-bs').textContent    = fin.retenIslrBs.toFixed(2);
 
-            if (pctDesc > 0) {
-                const f = 1 - pctDesc / 100;
-                baseBs   = roundFixed(baseBs   * f);
-                exentoBs = roundFixed(exentoBs * f);
-            }
+            // Write Monto Bs (Defaults to the full debt amount)
+            row.querySelector('.pm-monto-bs').value = fin.finalBs.toFixed(2);
 
-            const ivaBs    = roundFixed(baseBs * 0.16);
-            const newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
+            // Equiv USD (for the auto-filled payment amount)
+            row.querySelector('.pm-monto-usd').textContent = fin.equivUsd.toFixed(2);
 
-            const isReten = String(cxp.EsReten) === '1' || cxp.EsReten === true;
-            let porctRet  = parseFloat(cxp.PorctRet) || 0;
-            if (isReten && porctRet === 0) porctRet = 75;
-            const retencionBs = isReten ? roundFixed(ivaBs * (porctRet / 100)) : 0;
-
-            const totalAbonado  = parseFloat(cxp.TotalBsAbonado) || 0;
-            const saldoTargetBs = roundFixed(newMtoBs - totalAbonado);
-            let   finalBs       = roundFixed(saldoTargetBs - retencionBs);
-            if (finalBs < 0) finalBs = 0;
-
-            // Write Monto Bs
-            row.querySelector('.pm-monto-bs').value = finalBs.toFixed(2);
-
-            // Equiv USD
-            const equivUsd = currentTasa > 0 ? finalBs / currentTasa : 0;
-            row.querySelector('.pm-usd').textContent = equivUsd.toFixed(2);
+            // IMPORTANT: Overwrite the visual "Saldo USD" with the calculated mathematical reality 
+            // instead of the static database value to prevent incongruencies!
+            row.querySelector('.pm-saldo').textContent = fin.equivUsd.toFixed(2);
 
             pmRecalcTotals();
         };
 
+        // NEW HELPER: For when the user manually types a partial payment amount in Bs
+        const pmRecalcRowUsdAmount = (row) => {
+            const bs = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
+            const usdCell = row.querySelector('.pm-monto-usd');
+            if (bs <= 0) {
+                usdCell.textContent = '0.00';
+                return;
+            }
+            const indexado = row.querySelector('.pm-indexado')?.checked;
+            const nD = row.dataset.numerod;
+            const cxp = pmCxpStatuses[nD];
+            
+            if (!indexado && cxp && cxp.TasaEmision) {
+                usdCell.textContent = (bs / parseFloat(cxp.TasaEmision)).toFixed(2);
+            } else {
+                const rate = parseFloat(row.querySelector('.pm-tasa')?.value) || 1;
+                usdCell.textContent = rate > 0 ? (bs / rate).toFixed(2) : '0.00';
+            }
+        };
+
         const pmRecalcTotals = () => {
             let totalBs = 0, totalUsd = 0, totalSaldo = 0;
+            let totalIvaAPagar = 0, totalRetIva = 0, totalRetIslr = 0;
+
             document.querySelectorAll('#pmInvoicesTable tr').forEach(row => {
                 totalBs    += parseFloat(row.querySelector('.pm-monto-bs')?.value)     || 0;
-                totalUsd   += parseFloat(row.querySelector('.pm-usd')?.textContent)    || 0;
+                totalUsd   += parseFloat(row.querySelector('.pm-monto-usd')?.textContent) || 0;
                 totalSaldo += parseFloat(row.querySelector('.pm-saldo')?.textContent)  || 0;
+                
+                totalIvaAPagar += parseFloat(row.querySelector('.pm-iva-apagar-bs')?.textContent) || 0;
+                totalRetIva    += parseFloat(row.querySelector('.pm-retiva-bs')?.textContent)    || 0;
+                totalRetIslr   += parseFloat(row.querySelector('.pm-retislr-bs')?.textContent)   || 0;
             });
-            document.getElementById('pmTotalMontoBs').textContent  = totalBs.toFixed(2);
+
+            document.getElementById('pmTotalMontoBs').textContent  = formatBs(totalBs);
             document.getElementById('pmTotalMontoUsd').textContent = totalUsd.toFixed(2);
             document.getElementById('pmTotalSaldoUsd').textContent = totalSaldo.toFixed(2);
+            
+            // New footer totals
+            if(document.getElementById('pmTotalIvaAPagar')) document.getElementById('pmTotalIvaAPagar').textContent = formatBs(totalIvaAPagar);
+            if(document.getElementById('pmTotalRetIva'))    document.getElementById('pmTotalRetIva').textContent    = formatBs(totalRetIva);
+            if(document.getElementById('pmTotalRetIslr'))   document.getElementById('pmTotalRetIslr').textContent   = formatBs(totalRetIslr);
+
 
             const montoReal = parseFloat(document.getElementById('pmMontoTotalReal')?.value) || 0;
             const diff = montoReal - totalBs;
@@ -3197,67 +3448,42 @@ document.addEventListener('DOMContentLoaded', () => {
             const pctDesc    = prontoPago ? (parseFloat(row.querySelector('.pm-desc')?.value) || 0) : 0;
             const tasaDia    = parseFloat(row.querySelector('.pm-tasa')?.value) || 0;
             if (!tasaDia) { showToast('Cargando tasa BCV…', 'warning'); return; }
+            const islrRate = parseFloat(row.querySelector('.pm-islr-concept')?.value) || 0;
 
-            const historicalTasa = parseFloat(cxp.TasaEmision) || 1;
-            const currentTasa    = (indexado && tasaDia > 0) ? tasaDia : historicalTasa;
-
-            const tGravableUsd = (parseFloat(cxp.TGravable) || 0) / historicalTasa;
-            const exentoOrigBs = Math.max(0,
-                (parseFloat(cxp.Monto)||0)-(parseFloat(cxp.TGravable)||0)-(parseFloat(cxp.MtoTax)||0));
-            const exentoUsd    = exentoOrigBs / historicalTasa;
-
-            let baseBs, exentoBs;
-            if (indexado) {
-                baseBs   = roundFixed(tGravableUsd * currentTasa);
-                exentoBs = roundFixed(exentoUsd    * currentTasa);
-            } else {
-                baseBs   = roundFixed(parseFloat(cxp.TGravable) || 0);
-                exentoBs = roundFixed(exentoOrigBs);
-            }
-            if (pctDesc > 0) {
-                const f = 1 - pctDesc / 100;
-                baseBs   = roundFixed(baseBs   * f);
-                exentoBs = roundFixed(exentoBs * f);
-            }
-            const ivaBs   = roundFixed(baseBs * 0.16);
-            const newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
-
-            const isReten = String(cxp.EsReten) === '1' || cxp.EsReten === true;
-            let porctRet  = parseFloat(cxp.PorctRet) || 0;
-            if (isReten && porctRet === 0) porctRet = 75;
-            const retencionBs    = isReten ? roundFixed(ivaBs * (porctRet / 100)) : 0;
-            const ivaAPagarBs    = roundFixed(ivaBs - retencionBs);
-            const totalAbonado   = parseFloat(cxp.TotalBsAbonado) || 0;
-            const saldoTargetBs  = roundFixed(newMtoBs - totalAbonado);
-            const newRestanteBs  = roundFixed(saldoTargetBs - retencionBs);
+            const fin = calculateInvoiceFinancials(cxp, {
+                tasaDia: tasaDia,
+                aplicaIndex: indexado,
+                pctDesc: pctDesc,
+                islrRate: islrRate
+            });
 
             // Populate dynModal (reuse existing single-invoice modal elements)
             const dynModal = document.getElementById('dynamicInvoiceStatusModal');
             if (!dynModal) return;
 
-            dynModal.querySelector('#dynTasaBcv'     )&&(dynModal.querySelector('#dynTasaBcv'     ).textContent = formatBs(currentTasa));
-            dynModal.querySelector('#dynBaseBs'      )&&(dynModal.querySelector('#dynBaseBs'      ).textContent = formatBs(baseBs));
-            dynModal.querySelector('#dynIvaBs'       )&&(dynModal.querySelector('#dynIvaBs'       ).textContent = formatBs(ivaBs));
-            dynModal.querySelector('#dynIvaAPagar'   )&&(dynModal.querySelector('#dynIvaAPagar'   ).textContent = formatBs(ivaAPagarBs));
-            dynModal.querySelector('#dynIvaRetenido' )&&(dynModal.querySelector('#dynIvaRetenido' ).textContent = formatBs(retencionBs));
-            dynModal.querySelector('#dynExentoBs'    )&&(dynModal.querySelector('#dynExentoBs'    ).textContent = formatBs(exentoBs));
-            dynModal.querySelector('#dynRestanteBs'  )&&(dynModal.querySelector('#dynRestanteBs'  ).textContent = formatBs(newRestanteBs));
+            dynModal.querySelector('#dynTasaBcv'     )&&(dynModal.querySelector('#dynTasaBcv'     ).textContent = formatBs(fin.currentTasa));
+            dynModal.querySelector('#dynBaseBs'      )&&(dynModal.querySelector('#dynBaseBs'      ).textContent = formatBs(fin.baseBs));
+            dynModal.querySelector('#dynIvaBs'       )&&(dynModal.querySelector('#dynIvaBs'       ).textContent = formatBs(fin.ivaBs));
+            dynModal.querySelector('#dynIvaAPagar'   )&&(dynModal.querySelector('#dynIvaAPagar'   ).textContent = formatBs(fin.ivaAPagarBs));
+            dynModal.querySelector('#dynIvaRetenido' )&&(dynModal.querySelector('#dynIvaRetenido' ).textContent = formatBs(fin.retencionBs));
+            dynModal.querySelector('#dynRetenIslrBs' )&&(dynModal.querySelector('#dynRetenIslrBs' ).textContent = '- ' + formatBs(fin.retenIslrBs));
+            dynModal.querySelector('#dynExentoBs'    )&&(dynModal.querySelector('#dynExentoBs'    ).textContent = formatBs(fin.exentoBs));
+            dynModal.querySelector('#dynRestanteBs'  )&&(dynModal.querySelector('#dynRestanteBs'  ).textContent = formatBs(fin.finalBs));
 
-            const mtoTotalUsd = ((parseFloat(cxp.Monto)||0) / historicalTasa);
-            dynModal.querySelector('#dynMtoTotalUsd' )&&(dynModal.querySelector('#dynMtoTotalUsd' ).textContent = usdFormatter(mtoTotalUsd));
-            dynModal.querySelector('#dynSubtotalUsd' )&&(dynModal.querySelector('#dynSubtotalUsd' ).textContent = usdFormatter((parseFloat(cxp.TotalPrd)||0) / historicalTasa));
+            dynModal.querySelector('#dynMtoTotalUsd' )&&(dynModal.querySelector('#dynMtoTotalUsd' ).textContent = usdFormatter(fin.mtoTotalUsd));
+            dynModal.querySelector('#dynSubtotalUsd' )&&(dynModal.querySelector('#dynSubtotalUsd' ).textContent = usdFormatter(fin.subtotalUsd));
 
             if (pctDesc > 0) {
                 const dbox = dynModal.querySelector('#dynDescuentoBox');
                 if (dbox) dbox.style.display = 'flex';
                 dynModal.querySelector('#dynPctDesc')      && (dynModal.querySelector('#dynPctDesc').textContent      = pctDesc);
-                dynModal.querySelector('#dynMontoDescUsd') && (dynModal.querySelector('#dynMontoDescUsd').textContent = '-' + usdFormatter(roundFixed(mtoTotalUsd * pctDesc / 100)));
+                dynModal.querySelector('#dynMontoDescUsd') && (dynModal.querySelector('#dynMontoDescUsd').textContent = '-' + usdFormatter(fin.descUsdMonto));
             } else {
                 const dbox = dynModal.querySelector('#dynDescuentoBox');
                 if (dbox) dbox.style.display = 'none';
             }
             dynModal.querySelector('#dynDesctoFletesBox')&&(dynModal.querySelector('#dynDesctoFletesBox').innerHTML = '');
-            dynModal.querySelector('#dynIvaUsd')&&(dynModal.querySelector('#dynIvaUsd').textContent = usdFormatter(ivaBs / currentTasa));
+            dynModal.querySelector('#dynIvaUsd')&&(dynModal.querySelector('#dynIvaUsd').textContent = usdFormatter(fin.ivaUsd));
 
             dynModal.classList.add('active');
             lucide.createIcons();
@@ -3265,76 +3491,59 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ── Open global summary modal ───────────────────────────────────
         document.getElementById('btnGlobalDynamicStatus')?.addEventListener('click', () => {
-            const tbody = document.getElementById('globalDynamicBody');
-            if (!tbody) return;
+            console.log("Abriendo Resumen Global de Pagos...");
+            const pmModal = document.getElementById('pagoMultipleModal');
+            if(!pmModal || !pmModal.classList.contains('active')) {
+                showToast('Debe tener abierta la modal de Pago Múltiple.', 'warning');
+                return;
+            }
 
-            let totBase=0, totIva=0, totExento=0, totRetIva=0, totRetIslr=0, totTotal=0;
-            const rows = [];
+            const tbody = document.getElementById('pmInvoicesTable');
+            const summaryBody = document.getElementById('globalDynamicBody');
+            if(!summaryBody) return;
+            summaryBody.innerHTML = '';
 
-            document.querySelectorAll('#pmInvoicesTable tr').forEach(row => {
-                const nD  = row.dataset.numerod;
-                const cxp = pmCxpStatuses[nD];
-                if (!cxp) return;
+            let totals = { base:0, iva:0, ivaAPagar:0, exento:0, retIva:0, retIslr:0, total:0 };
 
-                const indexado   = row.querySelector('.pm-indexado')?.checked;
-                const prontoPago = row.querySelector('.pm-pronto-pago')?.checked;
-                const pctDesc    = prontoPago ? (parseFloat(row.querySelector('.pm-desc')?.value) || 0) : 0;
-                const tasaDia    = parseFloat(row.querySelector('.pm-tasa')?.value) || 0;
-                const historicalTasa = parseFloat(cxp.TasaEmision) || 1;
-                const currentTasa    = (indexado && tasaDia > 0) ? tasaDia : historicalTasa;
+            tbody.querySelectorAll('tr').forEach(row => {
+                const numeroD = row.getAttribute('data-numerod');
+                const baseBs = parseFloat(row.querySelector('.pm-base-bs')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
+                const ivaBs = parseFloat(row.querySelector('.pm-iva-bs')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
+                const exentoBs = parseFloat(row.querySelector('.pm-exento-bs')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
+                const retIvaBs = parseFloat(row.querySelector('.pm-retiva-bs')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
+                const retIslrBs = parseFloat(row.querySelector('.pm-retislr-bs')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
+                const ivaAPagarBs = roundFixed(ivaBs - retIvaBs);
+                const totalBs = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
 
-                const tGravableUsd = (parseFloat(cxp.TGravable)||0) / historicalTasa;
-                const exentoOrigBs = Math.max(0, (parseFloat(cxp.Monto)||0)-(parseFloat(cxp.TGravable)||0)-(parseFloat(cxp.MtoTax)||0));
-                const exentoUsd    = exentoOrigBs / historicalTasa;
+                totals.base += baseBs;
+                totals.iva += ivaBs;
+                totals.ivaAPagar += ivaAPagarBs;
+                totals.exento += exentoBs;
+                totals.retIva += retIvaBs;
+                totals.retIslr += retIslrBs;
+                totals.total += totalBs;
 
-                let baseBs, exentoBs;
-                if (indexado) {
-                    baseBs   = roundFixed(tGravableUsd * currentTasa);
-                    exentoBs = roundFixed(exentoUsd    * currentTasa);
-                } else {
-                    baseBs   = roundFixed(parseFloat(cxp.TGravable)||0);
-                    exentoBs = roundFixed(exentoOrigBs);
-                }
-                if (pctDesc > 0) {
-                    const f = 1 - pctDesc / 100;
-                    baseBs   = roundFixed(baseBs   * f);
-                    exentoBs = roundFixed(exentoBs * f);
-                }
-
-                const ivaBs    = roundFixed(baseBs * 0.16);
-                const newMtoBs = roundFixed(baseBs + ivaBs + exentoBs);
-
-                const isReten = String(cxp.EsReten) === '1' || cxp.EsReten === true;
-                let porctRet  = parseFloat(cxp.PorctRet) || 0;
-                if (isReten && porctRet === 0) porctRet = 75;
-                const retenIvaBs  = isReten ? roundFixed(ivaBs * (porctRet / 100)) : 0;
-                const retenIslrBs = 0; // ISLR not tracked per-row currently
-
-                const totalAbonado  = parseFloat(cxp.TotalBsAbonado)||0;
-                const saldoTargetBs = roundFixed(newMtoBs - totalAbonado);
-                const subtotalBs    = roundFixed(saldoTargetBs - retenIvaBs);
-
-                totBase    += baseBs;   totIva    += ivaBs;   totExento  += exentoBs;
-                totRetIva  += retenIvaBs; totRetIslr += retenIslrBs; totTotal += subtotalBs;
-
-                rows.push(`<tr>
-                    <td style="font-weight:500;">${nD}</td>
-                    <td class="amount">${formatBs(baseBs)}</td>
-                    <td class="amount">${formatBs(ivaBs)}</td>
-                    <td class="amount">${formatBs(exentoBs)}</td>
-                    <td class="amount" style="color:var(--danger)">${formatBs(retenIvaBs)}</td>
-                    <td class="amount" style="color:var(--danger)">${formatBs(retenIslrBs)}</td>
-                    <td class="amount" style="color:var(--success); font-weight:700;">${formatBs(subtotalBs)}</td>
-                </tr>`);
+                summaryBody.innerHTML += `
+                    <tr>
+                        <td>${numeroD}</td>
+                        <td class="amount">${formatBs(baseBs)}</td>
+                        <td class="amount">${formatBs(ivaBs)}</td>
+                        <td class="amount">${formatBs(ivaAPagarBs)}</td>
+                        <td class="amount">${formatBs(exentoBs)}</td>
+                        <td class="amount" style="color:var(--danger)">${formatBs(retIvaBs)}</td>
+                        <td class="amount" style="color:var(--danger)">${formatBs(retIslrBs)}</td>
+                        <td class="amount" style="font-weight:bold">${formatBs(totalBs)}</td>
+                    </tr>
+                `;
             });
 
-            tbody.innerHTML = rows.join('');
-            document.getElementById('gdobBase').textContent   = formatBs(totBase);
-            document.getElementById('gdobIva').textContent    = formatBs(totIva);
-            document.getElementById('gdobExento').textContent = formatBs(totExento);
-            document.getElementById('gdobRetIva').textContent = formatBs(totRetIva);
-            document.getElementById('gdobRetIslr').textContent= formatBs(totRetIslr);
-            document.getElementById('gdobTotal').textContent  = formatBs(totTotal);
+            document.getElementById('gdobBase').textContent = formatBs(totals.base);
+            document.getElementById('gdobIva').textContent = formatBs(totals.iva);
+            document.getElementById('gdobIvaAPagar').textContent = formatBs(totals.ivaAPagar);
+            document.getElementById('gdobExento').textContent = formatBs(totals.exento);
+            document.getElementById('gdobRetIva').textContent = formatBs(totals.retIva);
+            document.getElementById('gdobRetIslr').textContent = formatBs(totals.retIslr);
+            document.getElementById('gdobTotal').textContent = formatBs(totals.total);
 
             document.getElementById('globalDynamicRecalculateModal')?.classList.add('active');
             lucide.createIcons();
@@ -3342,15 +3551,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ── Build rows when modal opens ─────────────────────────────────
         document.getElementById('btnPagoMultiple')?.addEventListener('click', async () => {
-            const checked = document.querySelectorAll('.row-checkbox:checked');
-            if (checked.length < 2) return;
+            let items = [];
 
-            const items = [];
-            checked.forEach(cb => {
-                const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
-                const item = window.currentData.find(d => d.NroUnico === nroUnico);
-                if (item) items.push(item);
-            });
+            if (window.multiPayMode && window.multiPaySelection.size >= 2) {
+                // En modo múltiple: usar el Set completo (incluye facturas de otras búsquedas)
+                window.multiPaySelectionData.forEach(item => items.push(item));
+            } else {
+                // Modo normal: solo checkboxes visibles
+                const checked = document.querySelectorAll('.row-checkbox:checked');
+                if (checked.length < 2) return;
+                checked.forEach(cb => {
+                    const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
+                    const item = window.currentData.find(d => d.NroUnico === nroUnico);
+                    if (item) items.push(item);
+                });
+            }
+
             if (items.length < 2) return;
 
             const provs = new Set(items.map(i => i.CodProv));
@@ -3392,9 +3608,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     </td>
                     <td><input type="number" class="form-control pm-tasa" step="0.0001" readonly
                         style="width:80px;padding:0.3rem;font-size:0.8rem;background:var(--bg-card);"></td>
-                    <td><input type="number" class="form-control pm-monto-bs" step="0.01" min="0.01" required
+                    <td>
+                        <select class="form-control pm-islr-concept" style="width:100px;padding:0.2rem 0.3rem;font-size:0.75rem;">
+                            <option value="0">Sin Ret. (0%)</option>
+                            <option value="0.01">Bienes (1%)</option>
+                            <option value="0.03">Servicios (3%)</option>
+                            <option value="0.05">Alquileres (5%)</option>
+                        </select>
+                    </td>
+                    <td><input type="number" class="form-control pm-monto-bs" step="0.01" min="0" required
                         style="width:110px;padding:0.3rem;font-size:0.8rem;"></td>
-                    <td class="amount pm-usd" style="font-weight:bold;color:var(--success);">0.00</td>
+                    <td class="amount pm-monto-usd" style="font-weight:bold;color:var(--success);">0.00</td>
+                    <td style="display:none;" class="pm-base-bs">0</td>
+                    <td style="display:none;" class="pm-iva-bs">0</td>
+                    <td style="display:none;" class="pm-iva-apagar-bs">0</td>
+                    <td style="display:none;" class="pm-exento-bs">0</td>
+                    <td style="display:none;" class="pm-retiva-bs">0</td>
+                    <td style="display:none;" class="pm-retislr-bs">0</td>
                 </tr>
             `).join('');
 
@@ -3402,14 +3632,11 @@ document.addEventListener('DOMContentLoaded', () => {
             tbody.querySelectorAll('tr').forEach(row => {
                 row.querySelector('.pm-fecha')?.addEventListener('change', () => pmFetchRate(row));
                 row.querySelector('.pm-monto-bs')?.addEventListener('input', () => {
-                    // Manual edit: just recompute USD equiv
-                    const nD  = row.dataset.numerod;
-                    const cxp = pmCxpStatuses[nD];
-                    const tasa = parseFloat(row.querySelector('.pm-tasa')?.value) || 1;
-                    const indexado = row.querySelector('.pm-indexado')?.checked;
-                    const bs = parseFloat(row.querySelector('.pm-monto-bs').value) || 0;
-                    const currentTasa = (indexado && tasa > 0) ? tasa : (parseFloat(cxp?.TasaEmision)||1);
-                    row.querySelector('.pm-usd').textContent = (currentTasa > 0 ? bs / currentTasa : 0).toFixed(2);
+                    pmRecalcRowUsdAmount(row);
+                    pmRecalcTotals();
+                });
+                row.querySelector('.pm-islr-concept')?.addEventListener('change', () => {
+                    pmCalcRow(row);
                     pmRecalcTotals();
                 });
                 row.querySelector('.pm-indexado')?.addEventListener('change', () => pmCalcRow(row));
@@ -3419,7 +3646,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     const sel = row.querySelector('.pm-desc');
                     if (sel) {
                         sel.disabled = !row.querySelector('.pm-pronto-pago').checked;
-                        // Populate options from cxp data
                         if (cxp && !sel.disabled) {
                             let opts = '<option value="0">0%</option>';
                             if (parseFloat(cxp.ProntoPago1_Pct) > 0) opts += `<option value="${cxp.ProntoPago1_Pct}">PP1: ${parseFloat(cxp.ProntoPago1_Pct).toFixed(2)}%</option>`;
@@ -3447,13 +3673,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     const row = tbody.querySelector(`tr[data-numerod="${item.NumeroD}"]`);
                     if (!row) continue;
 
-                    // Show balance and tasa emisión
                     row.querySelector('.pm-saldo').textContent = (json.data.SaldoRestanteUSD || 0).toFixed(2);
                     const tasaEmis = parseFloat(json.data.TasaEmision) || 0;
                     const tasaEmisEl = row.querySelector('.pm-tasa-emis');
                     if (tasaEmisEl) tasaEmisEl.textContent = tasaEmis > 0 ? bsFormatter(tasaEmis) : '—';
 
-                    // Populate discount options
                     const sel = row.querySelector('.pm-desc');
                     if (sel && json.data) {
                         let opts = '<option value="0">0%</option>';
@@ -3463,6 +3687,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     await pmFetchRate(row);
+
+                    // Pre-load saved ISLR concept from localStorage
+                    const savedIslrRate = localStorage.getItem(`islr_${item.NumeroD}`);
+                    if (savedIslrRate) {
+                        const islrInput = row.querySelector('.pm-islr-concept');
+                        if (islrInput) {
+                            islrInput.value = savedIslrRate;
+                            pmCalcRow(row);
+                        }
+                    }
                 } catch (e) { console.error(e); }
             }
             pmRecalcTotals();
@@ -3489,7 +3723,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const indexado = row.querySelector('.pm-indexado')?.checked;
                 const tasa     = parseFloat(row.querySelector('.pm-tasa')?.value) || 0;
                 const montoBs  = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
-                const montoUsd = parseFloat(row.querySelector('.pm-usd')?.textContent) || 0;
+                const montoUsd = parseFloat(row.querySelector('.pm-monto-usd')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
+
+                // Ignore rows where the user has determined no payment should occur
+                if (montoBs <= 0) return;
 
                 pagos.push({
                     NumeroD: nD,
@@ -3502,6 +3739,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     Referencia: referencia
                 });
             });
+
+            if (pagos.length === 0) {
+                showToast('❌ No hay pagos válidos mayores a 0.00 para procesar.', 'warning');
+                btn.innerHTML = '<i data-lucide="check-circle"></i> Procesar Pagos';
+                btn.disabled = false;
+                lucide.createIcons();
+                return;
+            }
 
             const formData = new FormData();
             formData.append('pagos_json', JSON.stringify(pagos));
@@ -3519,7 +3764,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 showToast(`✅ ${result.count || pagos.length} pagos registrados exitosamente.`, 'success');
 
                 lastProcessedPagos = pagos;
-                // Enable Re-enviar correo now that payments have been processed
                 const resendBtn = document.getElementById('btnPmResendEmail');
                 if (resendBtn) resendBtn.disabled = false;
 
@@ -3703,7 +3947,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('cfgValorUT').value = data.ValorUT || 0;
                 document.getElementById('cfgProximoSecuencial').value = data.ProximoSecuencial || 1;
                 document.getElementById('cfgTasaEmisionSource').value = data.TasaEmisionSource || 'SACOMP';
-                document.getElementById('cfgMontoUsdSource').value = data.MontoUsdSource || 'Calculado';
+                document.getElementById('cfgMontoUsdSource').value = data.MontoUSDSource || 'Calculado';
+                // Load ISLRPersonaSource from global settings
+                if (document.getElementById('cfgISLRPersonaSource')) {
+                    document.getElementById('cfgISLRPersonaSource').value = window.globalRetConfig?.ISLRPersonaSource || 'SAINT';
+                }
             } catch (e) {
                 console.error('Error fetching config', e);
             }
@@ -3726,6 +3974,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 TasaEmisionSource: document.getElementById('cfgTasaEmisionSource').value,
                 MontoUsdSource: document.getElementById('cfgMontoUsdSource').value
             };
+            // Save ISLRPersonaSource and ToleranceSaldo to Procurement.Settings
+            const islrSrc = document.getElementById('cfgISLRPersonaSource')?.value;
+            const toleranceVal = document.getElementById('cfgToleranceSaldo')?.value;
+            if (islrSrc || toleranceVal) {
+                const settingsPayload = {};
+                if (islrSrc) settingsPayload.ISLRPersonaSource = islrSrc;
+                if (toleranceVal) settingsPayload.ToleranceSaldo = toleranceVal;
+
+                fetch('/api/procurement/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settingsPayload)
+                }).then(() => { 
+                    if (islrSrc) window.globalRetConfig.ISLRPersonaSource = islrSrc;
+                    if (toleranceVal) window.globalRetConfig.ToleranceSaldo = toleranceVal;
+                });
+            }
 
             try {
                 const res = await fetch('/api/retenciones/config', {
@@ -3738,6 +4003,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Update global state immediately
                 window.globalRetConfig.TasaEmisionSource = payload.TasaEmisionSource;
                 window.globalRetConfig.MontoUsdSource = payload.MontoUsdSource;
+                window.globalRetConfig.ValorUT = payload.ValorUT;
                 closeRetConfigModal();
                 // Re-render table if needed
                 if (window.currentData.length > 0) renderTable(window.currentData);
@@ -3926,6 +4192,178 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
+        // Generar Retencion ISLR (Multi-Factura)
+        const generarRetencionIslrModal = document.getElementById('generarRetencionIslrModal');
+        const generarRetencionIslrForm = document.getElementById('generarRetencionIslrForm');
+        let currentIslrItems = [];
+        let configUt = 43.00;
+
+        const recalcIslr = () => {
+            let totalMonto = 0, totalBase = 0, totalSustraendo = 0, totalRetenido = 0;
+            const conceptoValue = document.getElementById('genRetIslrConcepto').value;
+            const alicuota = parseFloat(conceptoValue) || 0;
+
+            document.querySelectorAll('#genRetIslrInvoicesTable tr').forEach(row => {
+                const monto = parseFloat(row.querySelector('.ret-monto')?.textContent) || 0;
+                const base = parseFloat(row.querySelector('.ret-base')?.value) || 0;
+                row.querySelector('.ret-alicuota-display').textContent = (alicuota * 100).toFixed(2);
+
+                const codProv = document.getElementById('genRetIslrCodProv').value;
+                const provInfo = allProviders.find(p => p.CodProv === codProv);
+                let tipoOverride = provInfo ? provInfo.TipoPersonaLocal : null;
+
+                // Evaluate ISLR using identical logic as standard Calc
+                const islrRetInfo = calcISLR(base, alicuota, codProv, tipoOverride);
+
+                // Note: calcISLR currently returns only mathematically rounded retained amount.
+                // We'll calculate sustraendo visually for the modal
+                let sustraendo = 0;
+                let retained = base * alicuota;
+                
+                // Redo internal logic to find if natural person
+                let isNatural = false;
+                if (tipoOverride === 'PJ') isNatural = false;
+                else if (tipoOverride === 'PN') isNatural = true;
+                else {
+                    const firstChar = String(codProv).trim().toUpperCase().charAt(0);
+                    isNatural = (firstChar === 'V' || firstChar === 'E' || firstChar === 'P');
+                }
+
+                if (isNatural) {
+                    sustraendo = alicuota * configUt * 83.3334;
+                    retained = Math.max(0, retained - sustraendo);
+                }
+
+                row.querySelector('.ret-sustraendo-display').textContent = sustraendo.toFixed(2);
+                row.querySelector('.ret-retenido-display').textContent = retained.toFixed(2);
+
+                totalMonto += monto;
+                totalBase += base;
+                totalSustraendo += sustraendo;
+                totalRetenido += retained;
+            });
+
+            document.getElementById('genRetIslrTotalMonto').textContent = totalMonto.toFixed(2);
+            document.getElementById('genRetIslrTotalBase').textContent = totalBase.toFixed(2);
+            document.getElementById('genRetIslrTotalSustraendo').textContent = totalSustraendo.toFixed(2);
+            document.getElementById('genRetIslrTotalRetenido').textContent = totalRetenido.toFixed(2);
+        };
+
+        document.getElementById('btnGenerarRetencionIslr')?.addEventListener('click', async () => {
+            const checked = document.querySelectorAll('.row-checkbox:checked');
+            if (checked.length < 1) return;
+
+            const items = [];
+            checked.forEach(cb => {
+                const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
+                const item = window.currentData.find(d => d.NroUnico === nroUnico);
+                if (item) items.push(item);
+            });
+            if (items.length === 0) return;
+
+            const provs = new Set(items.map(i => i.CodProv));
+            if (provs.size > 1) {
+                showToast('⚠️ Facturas deben ser del mismo proveedor.', 'warning');
+                return;
+            }
+
+            try {
+                if (window.globalRetConfig && window.globalRetConfig.ValorUT) {
+                    configUt = parseFloat(window.globalRetConfig.ValorUT);
+                }
+            } catch(e) {}
+
+            currentIslrItems = items;
+            document.getElementById('genRetIslrCodProv').value = items[0].CodProv;
+            document.getElementById('genRetIslrFechaEmision').value = new Date().toISOString().split('T')[0];
+
+            const tbody = document.getElementById('genRetIslrInvoicesTable');
+            tbody.innerHTML = items.map((item) => {
+                const monto = parseFloat(item.Monto) || 0;
+                const base = parseFloat(item.TGravable) || 0;
+                
+                return `
+                    <tr>
+                        <td>${item.NumeroD}</td>
+                        <td><input type="text" class="form-control ret-nrocontrol" value="${item.NroCtrol || ''}" style="width:100px;padding:0.3rem;font-size:0.8rem;"></td>
+                        <td class="amount ret-monto">${monto.toFixed(2)}</td>
+                        <td><input type="number" class="form-control ret-base" value="${base.toFixed(2)}" step="0.01" style="width:90px;padding:0.3rem;font-size:0.8rem;"></td>
+                        <td class="amount ret-alicuota-display">2.00</td>
+                        <td class="amount ret-sustraendo-display">0.00</td>
+                        <td class="amount ret-retenido-display" style="font-weight:bold;color:var(--danger);">0.00</td>
+                    </tr>
+                `;
+            }).join('');
+
+            tbody.querySelectorAll('.ret-base').forEach(inp => inp.addEventListener('input', recalcIslr));
+            generarRetencionIslrModal.classList.add('active');
+            lucide.createIcons();
+            recalcIslr();
+        });
+
+        document.getElementById('genRetIslrConcepto')?.addEventListener('change', recalcIslr);
+        window.closeGenerarRetencionIslrModal = () => generarRetencionIslrModal.classList.remove('active');
+
+        generarRetencionIslrForm?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (currentIslrItems.length === 0) return;
+
+            const btn = e.target.querySelector('button[type="submit"]');
+            btn.innerHTML = '<i class="loader" style="width:14px;height:14px;"></i>';
+            btn.disabled = true;
+
+            const fechaRetencion = document.getElementById('genRetIslrFechaEmision').value;
+            const selectEl = document.getElementById('genRetIslrConcepto');
+            const conceptoValue = selectEl.value;
+            const alicuotaPts = parseFloat(conceptoValue) * 100;
+            const conceptoName = selectEl.options[selectEl.selectedIndex].text;
+
+            const facturas = [];
+            document.querySelectorAll('#genRetIslrInvoicesTable tr').forEach((row, idx) => {
+                const item = currentIslrItems[idx];
+                const base = parseFloat(row.querySelector('.ret-base')?.value) || 0;
+                const sustraendo = parseFloat(row.querySelector('.ret-sustraendo-display')?.textContent) || 0;
+                const retained = parseFloat(row.querySelector('.ret-retenido-display')?.textContent) || 0;
+                const monto = parseFloat(row.querySelector('.ret-monto')?.textContent) || 0;
+                const nroControl = row.querySelector('.ret-nrocontrol')?.value || '';
+
+                facturas.push({
+                    NumeroD: item.NumeroD,
+                    CodProv: item.CodProv,
+                    FechaFactura: item.FechaE || fechaRetencion,
+                    NroCtrol: nroControl,
+                    MontoTotalBs: monto,
+                    BaseImponibleBs: base,
+                    AlicuotaPct: alicuotaPts,
+                    SustraendoBs: sustraendo,
+                    MontoRetenido: retained,
+                    ConceptoISLR: conceptoName
+                });
+            });
+
+            try {
+                const res = await fetch('/api/retenciones-islr', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ FechaRetencion: fechaRetencion, facturas })
+                });
+                if (!res.ok) {
+                    const errorJson = await res.json();
+                    throw new Error(errorJson.detail || 'Error al generar retención ISLR');
+                }
+                const result = await res.json();
+                showToast(`✅ Retención ISLR generada. Comprobante Nro: ${result.NumeroComprobante}`, 'success');
+                
+                closeGenerarRetencionIslrModal();
+                if (typeof fetchData === 'function') fetchData();
+            } catch (e) {
+                console.error(e);
+                showToast(e.message, 'error');
+            } finally {
+                btn.innerHTML = 'Generar Comprobante ISLR';
+                btn.disabled = false;
+            }
+        });
         // Trigger fetchRetenciones when the view is opened via SPA routing link
         document.querySelector('.nav-item[data-view="retenciones"]')?.addEventListener('click', fetchRetenciones);
     }
@@ -3939,11 +4377,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const TasaEmisionSource = formData.get('TasaEmisionSource');
             const MontoUSDSource = formData.get('MontoUSDSource');
             const LimiteCarga = formData.get('LimiteCarga');
+            const ToleranceSaldo = formData.get('ToleranceSaldo');
 
             const payload = {};
             if (TasaEmisionSource) payload.TasaEmisionSource = TasaEmisionSource;
             if (MontoUSDSource) payload.MontoUSDSource = MontoUSDSource;
             if (LimiteCarga !== null && LimiteCarga !== undefined) payload.LimiteCarga = LimiteCarga;
+            if (ToleranceSaldo !== null && ToleranceSaldo !== undefined && ToleranceSaldo !== "") payload.ToleranceSaldo = parseFloat(ToleranceSaldo);
 
             const btn = settingsFormElement.querySelector('button[type="submit"]');
             btn.innerHTML = '<i class="loader" style="width:14px;height:14px;border-color:white;border-bottom-color:transparent;"></i> Guardando...';
@@ -3988,6 +4428,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cb) cb.checked = true;
         recalculateSelection();
         document.getElementById('btnGenerarRetencion')?.click();
+    };
+
+    window.openRetencionIslrFromMain = (codProv, numeroD) => {
+        const item = window.currentData?.find(d => d.CodProv === codProv && d.NumeroD === numeroD);
+        if (!item) return;
+        document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
+        const cb = document.querySelector(`.row-checkbox[data-nrounico="${item.NroUnico}"]`);
+        if (cb) cb.checked = true;
+        recalculateSelection();
+        document.getElementById('btnGenerarRetencionIslr')?.click();
     };
 
     window.openNCFromMain = (codProv, numeroD) => {

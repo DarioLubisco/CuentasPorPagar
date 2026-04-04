@@ -9,11 +9,16 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Evitar caché agresivo del navegador -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <!-- SVG Icons (Lucide via CDN) -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Chart.js for data visualization -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=1.1">
 </head>
 
 <body>
@@ -45,6 +50,10 @@
                 <a href="#retenciones" class="nav-item" data-view="retenciones">
                     <i data-lucide="receipt"></i>
                     <span>Retenciones IVA</span>
+                </a>
+                <a href="#retenciones-islr" class="nav-item" data-view="retenciones-islr">
+                    <i data-lucide="file-text"></i>
+                    <span>Retenciones ISLR</span>
                 </a>
                 <a href="#compras" class="nav-item" data-view="compras">
                     <i data-lucide="shopping-cart"></i>
@@ -108,8 +117,7 @@
                     <div class="nav-group-items">
                         <a href="#expense-templates" class="nav-item nav-item-sub"
                             data-view="expense-templates">Plantillas</a>
-                        <a href="#expense-batch" class="nav-item nav-item-sub" data-view="expense-batch">Lote
-                            Mensual</a>
+                        <a href="#expense-batch" class="nav-item nav-item-sub" data-view="expense-batch">Gastos</a>
                     </div>
                 </div>
                 <div class="nav-group">
@@ -142,7 +150,7 @@
             <div id="view-dashboard" class="view-section active">
                 <header class="top-header">
                     <div class="header-left">
-                        <h1>Cuentas por Pagar</h1>
+                        <h1>Cuentas por Pagar <span style="font-size: 0.5em; color: var(--text-secondary);">(v1.1)</span></h1>
                         <p class="subtitle">Gestión de obligaciones y pagos a proveedores</p>
                     </div>
                     <div class="header-right">
@@ -195,6 +203,22 @@
                     </div>
                 </div>
 
+                <!-- Banner: Modo Pago Múltiple (oculto por defecto) -->
+                <div id="multiPayBanner" style="display: none;" class="multi-pay-banner glassmorphism">
+                    <i data-lucide="layers" style="flex-shrink:0;"></i>
+                    <span>
+                        <strong>Modo Pago Múltiple Activo</strong> &mdash;
+                        <span id="multiPayCount">0</span> factura(s) seleccionada(s)
+                    </span>
+                    <span id="multiPayTotalUsd" style="font-weight: bold; color: #10b981; margin-left: auto;"></span>
+                    <span style="color: var(--text-secondary); font-size: 0.8rem;">
+                        Cambié de búsqueda: las selecciones se mantienen ✅
+                    </span>
+                    <button onclick="window.toggleMultiPayMode()" class="btn btn-secondary" style="color:#ef4444; border-color:rgba(239,68,68,0.4); padding: 0.3rem 0.7rem; font-size: 0.85rem;">
+                        <i data-lucide="x-circle"></i> Desactivar
+                    </button>
+                </div>
+
                 <!-- Payment Planning Action Bar (Hidden by default) -->
                 <section id="planningActionBar" class="planning-action-bar glassmorphism" style="display: none;">
                     <div class="planning-controls">
@@ -230,7 +254,12 @@
                         <button id="btnGenerarRetencion" class="btn btn-secondary"
                     style="color: #eab308; border-color: rgba(234,179,8,0.4); display:none; align-items: center; gap: 0.5rem;">
                             <i data-lucide="receipt"></i>
-                            Generar Retención
+                            Generar Retención IVA
+                        </button>
+                        <button id="btnGenerarRetencionIslr" class="btn btn-secondary"
+                    style="color: #ef4444; border-color: rgba(239,68,68,0.4); display:none; align-items: center; gap: 0.5rem;">
+                            <i data-lucide="file-text"></i>
+                            Generar ISLR
                         </button>
                         <button id="btnPagoMultiple" class="btn btn-secondary"
                     style="color: #10b981; border-color: rgba(16,185,129,0.4); display:none; align-items: center; gap: 0.5rem;">
@@ -259,6 +288,12 @@
                                 title="Configurar Parámetros Indexación">
                                 <i data-lucide="settings"></i>
                                 Proveedores
+                            </button>
+                            <button id="btnActivarModoMultiple" class="btn btn-secondary"
+                                style="color: #10b981; border-color: rgba(16,185,129,0.4); display: flex; align-items: center; gap: 0.4rem;"
+                                onclick="window.toggleMultiPayMode()">
+                                <i data-lucide="layers"></i>
+                                Modo Pago Múltiple
                             </button>
                             <button id="refreshBtn" class="btn btn-primary"
                                 style="height: 38px; display: flex; align-items: center;">
@@ -345,150 +380,153 @@
                 </section>
             </div> <!-- End Dashboard View -->
 
-            <!-- Debit Notes View -->
-            <div id="view-debit-notes" class="view-section">
-                <header class="top-header">
-                    <div class="header-left">
-                        <h1>Notas de Débito Pendientes</h1>
-                        <p class="subtitle">Diferenciales por indexación de facturas abonadas</p>
+            <!-- Debit Notes View (Refactored to @module-report-view) -->
+            <div id="view-debit-notes" class="view-section report-view-container glass-card">
+                <header class="report-header">
+                    <h1 class="gradient-text">Notas de Débito Pendientes</h1>
+                    <div class="header-actions">
+                        <button id="btnHelpDN" class="primary-button glass" title="Ayuda" onclick="openHelpModal('DN')" style="background: rgba(var(--primary-rgb), 0.3);">
+                            <i data-lucide="help-circle"></i> Info Estatus
+                        </button>
+                        <button id="btnConfigDN" class="icon-button glass" title="Configuración">
+                            <i data-lucide="settings"></i>
+                        </button>
+                        <button id="exportDebitNotesBtn" class="primary-button glass">
+                            <i data-lucide="download"></i> Exportar (Excel)
+                        </button>
                     </div>
-                    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-                        <div class="search-container" style="flex: 1; min-width: 250px;">
-                            <i data-lucide="search"></i>
-                            <input type="text" id="dnFilterProv" placeholder="Filtrar por proveedor o factura...">
-                        </div>
-                        <select id="dnFilterEstatus" class="form-control" style="width: auto; min-width: 150px;">
+                </header>
+
+                <section class="controls-grid glass-overlay">
+                    <div class="filter-group">
+                        <label for="dnFechaDesde">Desde:</label>
+                        <input type="date" id="dnFechaDesde" class="glass-input">
+                        <label for="dnFechaHasta">Hasta:</label>
+                        <input type="date" id="dnFechaHasta" class="glass-input">
+                        <button id="refreshDebitNotesBtn" class="accent-button glass">
+                            <i data-lucide="play"></i> Procesar
+                        </button>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="dnFilterEstatus">Estatus:</label>
+                        <select id="dnFilterEstatus" class="glass-select">
                             <option value="">Todos los Estatus</option>
                             <option value="PENDIENTE">PENDIENTE</option>
                             <option value="SOLICITUD_ENVIADA">SOLICITUD ENVIADA</option>
                             <option value="EMITIDA">EMITIDA</option>
                         </select>
-                        <button id="refreshDebitNotesBtn" class="btn btn-secondary">
-                            <i data-lucide="refresh-cw"></i>
-                        </button>
                     </div>
-                </header>
 
-                <section class="table-section glassmorphism" style="margin-top: 1.5rem;">
-                    <div class="table-header">
-                        <h2>Relación de Facturas</h2>
-                        <div class="table-actions" style="display: flex; gap: 1rem; align-items: flex-end;">
-                            <div id="debitNotesActionBar"
-                                style="display: none; align-items: center; gap: 0.5rem; background: rgba(59, 130, 246, 0.1); padding: 0.5rem 1rem; border-radius: var(--radius-md); border: 1px solid rgba(59, 130, 246, 0.2);">
-                                <span style="font-size: 0.85rem; font-weight: 500; color: var(--primary-accent);"><span
-                                        id="dnSelectedCount">0</span> seleccionadas</span>
-                                <button id="btnSendDebitNotes" class="btn btn-primary"
-                                    style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">
-                                    <i data-lucide="mail"></i> Solicitar N/D por Correo
-                                </button>
-                                <button id="btnRegisterDebitNote" class="btn btn-secondary"
-                                    style="padding: 0.4rem 0.8rem; font-size: 0.85rem; color: var(--success); border-color: var(--success);">
-                                    <i data-lucide="check-circle"></i> Recibir N/D
-                                </button>
-                            </div>
-                            <button id="refreshDebitNotesBtn" class="btn btn-secondary">
-                                <i data-lucide="refresh-cw"></i> Actualizar
-                            </button>
-                            <button id="exportDebitNotesBtn" class="btn btn-secondary" title="Exportar a Excel">
-                                <i data-lucide="download"></i> Exportar
-                            </button>
+                    <div class="search-group">
+                        <div class="search-box glass">
+                            <i data-lucide="search"></i>
+                            <input type="text" id="dnFilterProv" placeholder="Busque por Factura o Proveedor...">
                         </div>
-                    </div>
-
-                    <div class="table-responsive">
-                        <table id="debitNotesTable">
-                            <thead>
-                                <tr>
-                                    <th class="col-checkbox"><input type="checkbox" id="dnSelectAll"></th>
-                                    <th>Proveedor</th>
-                                    <th>Nro Factura</th>
-                                    <th>Emisión</th>
-                                    <th style="text-align: right;">M. Orig (Bs)</th>
-                                    <th style="text-align: right;">Total Pagado (Bs)</th>
-                                    <th style="text-align: right; color: var(--danger);">Dif. N/D (Bs)</th>
-                                    <th style="text-align: right; color: var(--warning);">Reten (Bs)</th>
-                                    <th style="text-align: center;">Estatus</th>
-                                    <th>Nro N/D</th>
-                                </tr>
-                            </thead>
-                            <tbody id="debitNotesTableBody">
-                                <tr>
-                                    <td colspan="10" class="loading-cell">
-                                        <div class="loader"></div>
-                                        <p>Consultando base de datos...</p>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
                     </div>
                 </section>
-            </div>
 
-            <!-- Credit Notes View -->
-            <div id="view-credit-notes" class="view-section">
-                <header class="top-header">
-                    <div class="header-left">
-                        <h1>Notas de Crédito</h1>
-                        <p class="subtitle">Seguimiento de saldos a favor (Pagos en exceso / Devoluciones)</p>
-                    </div>
-                    <div class="header-right">
-                        <button id="btnNewCreditNote" class="btn btn-primary">
-                            <i data-lucide="plus-circle"></i> Nueva Solicitud
+                <div class="table-actions" style="margin-bottom: 1rem; margin-top: 1rem;">
+                    <div id="debitNotesActionBar" style="display: none; align-items: center; gap: 0.5rem; background: rgba(59, 130, 246, 0.1); padding: 0.5rem 1rem; border-radius: var(--radius-md); border: 1px solid rgba(59, 130, 246, 0.2);">
+                        <span style="font-size: 0.85rem; font-weight: 500; color: var(--primary-accent);"><span id="dnSelectedCount">0</span> seleccionadas</span>
+                        <button id="btnSendDebitNotes" class="btn btn-primary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">
+                            <i data-lucide="mail"></i> Solicitar N/D por Correo
                         </button>
-                        <button id="refreshCreditNotesBtn" class="btn btn-secondary">
-                            <i data-lucide="refresh-cw"></i> Actualizar
+                        <button id="btnRegisterDebitNote" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; color: var(--success); border-color: var(--success);">
+                            <i data-lucide="check-circle"></i> Recibir N/D
                         </button>
-                    </div>
-                </header>
-
-                <div class="dashboard-stats" style="margin-top: 1.5rem; margin-bottom: 1.5rem;">
-                    <div class="stat-card glassmorphism" style="grid-column: span 6; padding: 1rem;">
-                        <div style="display: flex; gap: 1.5rem; align-items: center;">
-                            <div class="input-group" style="margin: 0; flex: 1;">
-                                <label style="font-size: 0.8rem; color: var(--text-secondary);">Filtrar por Proveedor:</label>
-                                <input type="text" id="cnFilterProv" class="form-control" placeholder="Nombre o Código...">
-                            </div>
-                            <div class="input-group" style="margin: 0; width: 180px;">
-                                <label style="font-size: 0.8rem; color: var(--text-secondary);">Estatus:</label>
-                                <select id="cnFilterEstatus" class="form-control">
-                                    <option value="">TODOS</option>
-                                    <option value="PENDIENTE" selected>PENDIENTE</option>
-                                    <option value="APLICADA">APLICADA</option>
-                                    <option value="ANULADA">ANULADA</option>
-                                </select>
-                            </div>
-                        </div>
                     </div>
                 </div>
 
-                <section class="table-section glassmorphism">
-                    <div class="table-responsive">
-                        <table id="creditNotesTable">
-                            <thead>
-                                <tr>
-                                    <th>Cód. Prov.</th>
-                                    <th>Nro Control/Fact</th>
-                                    <th>Motivo</th>
-                                    <th class="amount">Monto (Bs)</th>
-                                    <th class="amount">Tasa</th>
-                                    <th class="amount">Monto (USD)</th>
-                                    <th>Solicitud</th>
-                                    <th style="text-align: center;">Estatus</th>
-                                    <th>Nota Crédito ID</th>
-                                    <th style="text-align: center;">Acción</th>
-                                </tr>
-                            </thead>
-                            <tbody id="creditNotesTableBody">
-                                <tr>
-                                    <td colspan="10" class="loading-cell">
-                                        <div class="loader"></div>
-                                        <p>Cargando notas de crédito...</p>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                <div class="table-wrapper glass-scroll">
+                    <table id="debitNotesTable" class="glass-table">
+                        <thead>
+                            <tr>
+                                <th class="col-checkbox" style="width: 40px; cursor: default;"><input type="checkbox" id="dnSelectAll"></th>
+                                <th onclick="sortDebitNotes('proveedor')">Proveedor <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortDebitNotes('factura')">Nro Factura <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortDebitNotes('emision')">Emisión <i data-lucide="chevrons-up-down"></i></th>
+                                <th style="text-align: right;" onclick="sortDebitNotes('monto_orig')">M. Orig (Bs) <i data-lucide="chevrons-up-down"></i></th>
+                                <th style="text-align: right;" onclick="sortDebitNotes('total_pagado')">Total Pagado (Bs) <i data-lucide="chevrons-up-down"></i></th>
+                                <th style="text-align: right; color: var(--danger);" onclick="sortDebitNotes('diferencial')">Dif. N/D (Bs) <i data-lucide="chevrons-up-down"></i></th>
+                                <th style="text-align: right; color: var(--warning);">Reten (Bs)</th>
+                                <th style="text-align: center;">Estatus</th>
+                                <th>Nro N/D</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="debitNotesTableBody">
+                            <tr><td colspan="10" class="loading-cell"><div class="loader"></div><p>Consultando base de datos...</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Credit Notes View -->
+            <!-- Credit Notes View (Refactored to @module-report-view) -->
+            <div id="view-credit-notes" class="view-section report-view-container glass-card">
+                <header class="report-header">
+                    <h1 class="gradient-text">Notas de Crédito</h1>
+                    <div class="header-actions">
+                        <button id="btnHelpCN" class="primary-button glass" title="Ayuda" onclick="openHelpModal('CN')" style="background: rgba(var(--primary-rgb), 0.3);">
+                            <i data-lucide="help-circle"></i> Info Estatus
+                        </button>
+                        <button id="btnNewCreditNote" class="primary-button glass">
+                            <i data-lucide="plus-circle"></i> Nueva Solicitud
+                        </button>
+                    </div>
+                </header>
+
+                <section class="controls-grid glass-overlay">
+                    <div class="filter-group">
+                        <label for="cnFechaDesde">Desde:</label>
+                        <input type="date" id="cnFechaDesde" class="glass-input">
+                        <label for="cnFechaHasta">Hasta:</label>
+                        <input type="date" id="cnFechaHasta" class="glass-input">
+                        <button id="refreshCreditNotesBtn" class="accent-button glass">
+                            <i data-lucide="play"></i> Procesar
+                        </button>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="cnFilterEstatus">Estatus:</label>
+                        <select id="cnFilterEstatus" class="glass-select">
+                            <option value="">TODOS</option>
+                            <option value="PENDIENTE" selected>PENDIENTE</option>
+                            <option value="APLICADA">APLICADA</option>
+                            <option value="ANULADA">ANULADA</option>
+                        </select>
+                    </div>
+
+                    <div class="search-group">
+                        <div class="search-box glass">
+                            <i data-lucide="search"></i>
+                            <input type="text" id="cnFilterProv" placeholder="Busque por Código, Proveedor o Factura...">
+                        </div>
                     </div>
                 </section>
+
+                <div class="table-wrapper glass-scroll">
+                    <table id="creditNotesTable" class="glass-table">
+                        <thead>
+                            <tr>
+                                <th onclick="sortCreditNotes('proveedor')">Cód. Prov. <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortCreditNotes('factura')">Nro Control/Fact <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortCreditNotes('motivo')">Motivo <i data-lucide="chevrons-up-down"></i></th>
+                                <th class="amount" onclick="sortCreditNotes('monto_bs')">Monto (Bs) <i data-lucide="chevrons-up-down"></i></th>
+                                <th class="amount" onclick="sortCreditNotes('tasa')">Tasa <i data-lucide="chevrons-up-down"></i></th>
+                                <th class="amount" onclick="sortCreditNotes('monto_usd')">Monto (USD) <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortCreditNotes('fecha')">Solicitud <i data-lucide="chevrons-up-down"></i></th>
+                                <th style="text-align: center;" onclick="sortCreditNotes('estatus')">Estatus <i data-lucide="chevrons-up-down"></i></th>
+                                <th>Nota Crédito ID</th>
+                                <th style="text-align: center;">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="creditNotesTableBody">
+                            <tr><td colspan="10" class="loading-cell"><div class="loader"></div><p>Cargando notas de crédito...</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <!-- Compras View -->
@@ -961,7 +999,7 @@
             <div id="view-expense-batch" class="view-section">
                 <header class="top-header">
                     <div class="header-left">
-                        <h1>Lote Mensual de Gastos</h1>
+                        <h1>Gastos</h1>
                         <p class="subtitle">Genera, verifica y guarda los gastos proyectados para el mes seleccionado
                         </p>
                     </div>
@@ -1225,56 +1263,135 @@
             </div>
 
             <!-- Retenciones IVA View -->
-            <div id="view-retenciones" class="view-section">
-                <header class="top-header">
-                    <div class="header-left">
-                        <h1>Retenciones de IVA</h1>
-                        <p class="subtitle">Gestión y emisión de comprobantes de retención</p>
-                    </div>
-                    <div class="header-right" style="display: flex; gap: 1rem; align-items: center;">
-                        <div class="date-filters">
-                            <div class="filter-group">
-                                <label>Desde</label>
-                                <input type="date" id="retencionesDesde" class="form-control">
-                            </div>
-                            <div class="filter-group">
-                                <label>Hasta</label>
-                                <input type="date" id="retencionesHasta" class="form-control">
-                            </div>
-                        </div>
-                        <button type="button" class="btn btn-primary" id="refreshRetencionesBtn">
-                            <i data-lucide="refresh-cw"></i> Buscar
+            <!-- Retenciones IVA View (Refactored to @module-report-view) -->
+            <div id="view-retenciones" class="view-section report-view-container glass-card">
+                <header class="report-header">
+                    <h1 class="gradient-text">Retenciones de IVA</h1>
+                    <div class="header-actions">
+                        <button id="btnHelpIVA" class="primary-button glass" title="Ayuda" onclick="openHelpModal('IVA')" style="background: rgba(var(--primary-rgb), 0.3);">
+                            <i data-lucide="help-circle"></i> Info Estatus
                         </button>
-                        <button class="btn btn-secondary" id="exportRetencionesTxtBtn">
+                        <button id="configRetencionesBtn" class="icon-button glass" title="Configuración">
+                            <i data-lucide="settings"></i>
+                        </button>
+                        <button id="exportRetencionesTxtBtn" class="primary-button glass">
                             <i data-lucide="download"></i> TXT SENIAT
-                        </button>
-                        <button type="button" class="btn btn-secondary" id="configRetencionesBtn">
-                            <i data-lucide="settings"></i> Configurar
                         </button>
                     </div>
                 </header>
 
-                <div class="card" style="margin-top: 2rem;">
-                    <div class="card-header"><h2>Comprobantes Emitidos</h2></div>
-                    <div class="table-responsive">
-                        <table id="retencionesTable" class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Comprobante</th>
-                                    <th>Factura</th>
-                                    <th>Proveedor</th>
-                                    <th>Fecha Ret.</th>
-                                    <th>Monto Fact.</th>
-                                    <th>Retenido</th>
-                                    <th>Estado</th>
-                                    <th>Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody id="retencionesTableBody">
-                                <tr><td colspan="8" class="loading-cell"><div class="loader"></div><p>Cargando retenciones...</p></td></tr>
-                            </tbody>
-                        </table>
+                <section class="controls-grid glass-overlay">
+                    <div class="filter-group">
+                        <label for="retencionesDesde">Desde:</label>
+                        <input type="date" id="retencionesDesde" class="glass-input">
+                        <label for="retencionesHasta">Hasta:</label>
+                        <input type="date" id="retencionesHasta" class="glass-input">
+                        <button id="refreshRetencionesBtn" class="accent-button glass">
+                            <i data-lucide="play"></i> Buscar
+                        </button>
                     </div>
+
+                    <div class="filter-group">
+                        <label for="retFilterEstatus">Estatus:</label>
+                        <select id="retFilterEstatus" class="glass-select">
+                            <option value="">Todos</option>
+                            <option value="GENERADO">Generado</option>
+                            <option value="ANULADO">Anulado</option>
+                        </select>
+                    </div>
+
+                    <div class="search-group">
+                        <div class="search-box glass">
+                            <i data-lucide="search"></i>
+                            <input type="text" id="retUniversalSearch" placeholder="Busque por Comprobante, Factura o Proveedor...">
+                        </div>
+                    </div>
+                </section>
+
+                <div class="table-wrapper glass-scroll">
+                    <table id="retencionesTable" class="glass-table">
+                        <thead>
+                            <tr>
+                                <th onclick="sortRetenciones('comprobante')">Comprobante <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortRetenciones('factura')">Factura <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortRetenciones('proveedor')">Proveedor <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortRetenciones('fecha')">Fecha Ret. <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortRetenciones('monto_fact')">Monto Fact. <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortRetenciones('retenido')">Retenido <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortRetenciones('estado')">Estado <i data-lucide="chevrons-up-down"></i></th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="retencionesTableBody">
+                            <tr><td colspan="8" class="loading-cell"><div class="loader"></div><p>Cargando retenciones...</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Retenciones ISLR View (Generated from @module-report-view) -->
+            <div id="view-retenciones-islr" class="view-section report-view-container glass-card">
+                <header class="report-header">
+                    <h1 class="gradient-text">Retenciones de ISLR</h1>
+                    <div class="header-actions">
+                        <button id="btnHelpISLR" class="primary-button glass" title="Ayuda" onclick="openHelpModal('ISLR')" style="background: rgba(var(--primary-rgb), 0.3);">
+                            <i data-lucide="help-circle"></i> Info Estatus
+                        </button>
+                        <button id="btnConfigIslr" class="icon-button glass" title="Configuración" onclick="openRetConfigModal()">
+                            <i data-lucide="settings"></i>
+                        </button>
+                        <button id="btnExportIslrPdf" class="primary-button glass" onclick="exportRestencionesIslrPDF()">
+                            <i data-lucide="download"></i> Exportar a PDF/TXT
+                        </button>
+                    </div>
+                </header>
+
+                <section class="controls-grid glass-overlay">
+                    <div class="filter-group">
+                        <label for="islrDesde">Desde:</label>
+                        <input type="date" id="islrDesde" class="glass-input">
+                        <label for="islrHasta">Hasta:</label>
+                        <input type="date" id="islrHasta" class="glass-input">
+                        <button id="btnRefreshIslr" class="accent-button glass" onclick="fetchRetencionesISLR()">
+                            <i data-lucide="play"></i> Procesar
+                        </button>
+                    </div>
+
+                    <div class="filter-group">
+                        <label for="islrFilterEstatus">Estatus:</label>
+                        <select id="islrFilterEstatus" class="glass-select" onchange="debouncedIslrSearch()">
+                            <option value="">Todos</option>
+                            <option value="GENERADO">Generado</option>
+                            <option value="ANULADO">Anulado</option>
+                        </select>
+                    </div>
+
+                    <div class="search-group">
+                        <div class="search-box glass">
+                            <i data-lucide="search"></i>
+                            <input type="text" id="islrUniversalSearch" placeholder="Busque por Comprobante, Factura o Proveedor..." onkeyup="debouncedIslrSearch()">
+                        </div>
+                    </div>
+                </section>
+
+                <div class="table-wrapper glass-scroll">
+                    <table id="retencionesIslrTable" class="glass-table">
+                        <thead>
+                            <tr>
+                                <th onclick="sortIslrTable('comprobante')">N° Comprobante <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortIslrTable('factura')">N° Factura <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortIslrTable('proveedor')">Proveedor <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortIslrTable('fecha')">Fecha Retención <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortIslrTable('base')">Base Imponible <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortIslrTable('retenido')">Retenido ISLR <i data-lucide="chevrons-up-down"></i></th>
+                                <th onclick="sortIslrTable('estado')">Estatus <i data-lucide="chevrons-up-down"></i></th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="retencionesIslrTableBody">
+                            <tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">Seleccione el rango de fechas y haga clic en Procesar.</td></tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
             <!-- Settings View -->
@@ -1336,6 +1453,19 @@
                                     <label style="display: flex; align-items: center; gap: 0.5rem;">
                                         <input type="number" name="LimiteCarga" id="settingsLimiteCarga" class="form-control" style="max-width: 150px;" min="10" placeholder="Ej: 500">
                                         <span style="font-size: 0.9rem; color: var(--text-secondary);">(Dejar en blanco para cargar todos los registros)</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="settings-group" style="margin-bottom: 2rem; padding: 1.5rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                                <h3 style="margin-bottom: 0.5rem; font-size: 1.05rem; color: var(--primary-accent);">4. Tolerancia de Saldo para Cierre Financiero</h3>
+                                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                                    Define el monto máximo (en Bolívares) de discrepancia permitida para considerar una factura como PAGADA automáticamente, neutralizando errores de centavos.
+                                </p>
+                                <div style="display: flex; flex-direction: column; gap: 0.8rem; color: var(--text-primary);">
+                                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <input type="number" name="ToleranceSaldo" id="settingsToleranceSaldo" class="form-control" step="0.01" style="max-width: 150px;" min="0" placeholder="Ej: 0.50">
+                                        <span style="font-size: 0.9rem; color: var(--text-secondary);">Bs.</span>
                                     </label>
                                 </div>
                             </div>
@@ -1413,6 +1543,7 @@
                             <th>Días NI</th>
                             <th>Días Vencimiento</th>
                             <th>Email N/D</th>
+                            <th>Tipo (ISLR)</th>
                             <th>PP1 % (Días)</th>
                             <th>PP2 % (Días)</th>
                             <th>Acción</th>
@@ -1434,28 +1565,27 @@
         <div class="modal-content glassmorphism" style="max-width: 500px;">
             <h2>Registrar Notas de Débito</h2>
             <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
-                Las facturas seleccionadas se marcarán como "EMITIDA". Ingrese el número de documento de la Nota de
-                Débito. Si varias facturas corresponden a un mismo documento, ingrese el mismo número.
+                Las facturas seleccionadas se marcarán como "EMITIDA" y se insertarán automáticamente en Saint administrativo. Ingrese los números legales de la Nota de Débito.
             </p>
             <form id="registerDebitNoteForm">
                 <div class="input-group">
-                    <label>Número de Nota de Débito (Referencia):</label>
-                    <input type="text" id="dnInputNumero" class="form-control" required placeholder="Ej: ND-00123">
+                    <label>Número de Documento (Nota de Débito):</label>
+                    <input type="text" id="regNdInputNumero" class="form-control" required placeholder="Ej: 0001234">
                 </div>
-                <div style="margin-top: 1.5rem;">
-                    <label
-                        style="font-weight: 600; font-size: 0.95rem; display: block; margin-bottom: 0.5rem;">Retenciones
-                        por Factura (Bs):</label>
-                    <div id="dnSelectedInvoicesList"
-                        style="max-height: 250px; overflow-y: auto; background: var(--bg-card); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.8rem;">
-                        <!-- Injected via JS -->
-                    </div>
+                <div class="input-group">
+                    <label>Número de Control Fiscal:</label>
+                    <input type="text" id="regNdInputControl" class="form-control" required placeholder="Ej: 00-001234">
+                </div>
+                
+                <h4 style="margin-top: 1.5rem;">Cálculo Estimado a Procesar</h4>
+                <div id="regNdFacturasContainer" style="background: var(--bg-card); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.8rem;">
+                    <!-- Injected via JS -->
                 </div>
                 <div class="modal-actions"
                     style="margin-top: 1.5rem; display: flex; justify-content: flex-end; gap: 1rem;">
                     <button type="button" class="btn btn-secondary"
                         onclick="closeRegisterDebitNoteModal()">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Registrar</button>
+                    <button type="submit" class="btn btn-primary" id="regNdSubmitBtn">Registrar y Conciliar en Saint</button>
                 </div>
             </form>
         </div>
@@ -1511,6 +1641,18 @@
                         <label>PP2 - Días Vigencia:</label>
                         <input type="number" id="editProvPP2Dias" class="form-control" min="0">
                     </div>
+                </div>
+
+                <div class="input-group">
+                    <label>Tipo de Persona (ISLR):</label>
+                    <select id="editProvTipoPersona" class="form-control">
+                        <option value="">🔁 Automático (desde Saint / RIF)</option>
+                        <option value="PJ">🏢 Persona Jurídica (PJ)</option>
+                        <option value="PN">👤 Persona Natural (PN)</option>
+                    </select>
+                    <small style="color:var(--text-secondary);font-size:0.78rem;margin-top:0.25rem;display:block;">
+                        "Automático" usa el prefijo del RIF (J/G→PJ, V/E/P→PN). Seleccione manualmente para forzar.
+                    </small>
                 </div>
 
                 <div class="modal-actions"
@@ -1570,7 +1712,7 @@
 
     <!-- Abonos / Pagos Modal -->
     <div id="abonosModal" class="modal" style="z-index: 1002;">
-        <div class="modal-content glassmorphism" style="max-width: 1000px; width: 95%;">
+        <div class="modal-content glassmorphism" style="max-width: 1300px; width: 95%; max-height: 90vh; overflow-y: auto;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem;">
                 <div>
                     <h2 id="abonoModalTitle" style="margin-bottom: 0.2rem;">Gestión de Pagos</h2>
@@ -1678,8 +1820,9 @@
                                     required>
                             </div>
                             <div class="input-group" style="padding-bottom: 2px;">
-                                <button type="button" class="btn btn-secondary" id="btnDynamicInvoiceStatus" title="Recalcular Estado de la Factura con Tasa Actual" style="padding: 0.65rem;">
-                                    <i data-lucide="calculator"></i>
+                                <button type="button" class="btn btn-secondary" id="btnDynamicInvoiceStatus" title="Recalcular Estado de la Factura" style="padding: 0 0.75rem; display: flex; align-items: center; gap: 0.5rem; height: 2.8rem; background: var(--bg-tertiary); border: 1px solid var(--border-color);">
+                                    <i data-lucide="calculator" size="16"></i>
+                                    <span style="font-size:0.85rem; font-weight:600;">Resumen Cálculo</span>
                                 </button>
                             </div>
                             <div class="input-group">
@@ -1700,18 +1843,40 @@
                                 style="color: var(--success); font-weight: bold; background: rgba(16, 185, 129, 0.05);">
                         </div>
 
-                        <div style="display: flex; gap: 1rem; align-items: center; margin-top: 0.5rem; flex-wrap: wrap;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; align-items: center; margin-top: 0.5rem;">
                             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                                 <input type="checkbox" id="abAplicaIndex">
                                 <span>¿Aplicar Indexación?</span>
                             </label>
-                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-left: auto;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                                 <input type="checkbox" id="abProntoPago">
                                 <span>Pronto Pago</span>
                             </label>
-                            <select id="abTipoDescuento" class="form-control" style="width: auto; padding: 0.3rem 0.6rem; min-width: 140px;" disabled>
-                                <option value="0">Descuento 0%</option>
-                            </select>
+                            <div class="input-group">
+                                <select id="abTipoDescuento" class="form-control" style="font-size: 0.85rem;" disabled>
+                                    <option value="0">Descuento 0%</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 1rem; align-items: end; margin-top: 0.5rem;">
+                            <div class="input-group">
+                                <label>Concepto ISLR:</label>
+                                <select id="abConceptoISLR" class="form-control" style="font-size: 0.85rem;">
+                                    <option value="0">Sin Retención (0%)</option>
+                                    <option value="0.01">Bienes / Compras (1%)</option>
+                                    <option value="0.03">Servicios / Honorarios (3%)</option>
+                                    <option value="0.05">Alquileres (5%)</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label>IVA a Pagar (Bs):</label>
+                                <input type="text" id="abIvaAPagarBs" class="form-control" readonly style="background: var(--bg-card); font-weight: 600; color: var(--primary-accent);">
+                            </div>
+                            <div class="input-group">
+                                <label>Ret. ISLR (Bs):</label>
+                                <input type="text" id="abRetenIslrBs" class="form-control" readonly style="background: var(--bg-card); font-weight: 600; color: var(--danger);">
+                            </div>
                         </div>
 
                         <div class="input-group" style="margin-top: 0.5rem;">
@@ -1758,6 +1923,7 @@
                                 <th>Indexado</th>
                                 <th>Amortizado USD</th>
                                 <th>Referencia</th>
+                                <th>Acción</th>
                             </tr>
                         </thead>
                         <tbody id="abonosHistoryBody">
@@ -1773,7 +1939,7 @@
 
     <!-- Pago Múltiple Modal -->
     <div id="pagoMultipleModal" class="modal" style="z-index: 10030;">
-        <div class="modal-content glassmorphism" style="max-width: 1375px; width: 95%;">
+        <div class="modal-content glassmorphism" style="max-width: 1850px; width: 92%;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
                 <h2 style="margin:0;"><i data-lucide="banknote" style="width:20px;height:20px;vertical-align:middle;"></i> Pago Múltiple de Facturas</h2>
                 <button class="btn-icon" onclick="closePagoMultipleModal()"><i data-lucide="x"></i></button>
@@ -1795,7 +1961,8 @@
                                 <th>Indexado</th>
                                 <th>P. Pago</th>
                                 <th>Desc.</th>
-                                <th>Tasa</th>
+                                <th>Tasa BCV</th>
+                                <th>Concepto ISLR (%)</th>
                                 <th>Monto Bs</th>
                                 <th>Equiv. USD</th>
                             </tr>
@@ -1805,9 +1972,20 @@
                             <tr style="background:var(--bg-tertiary);font-weight:bold;">
                                 <td>TOTALES:</td>
                                 <td id="pmTotalSaldoUsd" class="amount" style="color:var(--success);">0.00</td>
-                                <td colspan="7"></td>
+                                <td colspan="8"></td>
                                 <td id="pmTotalMontoBs" class="amount">0.00</td>
                                 <td id="pmTotalMontoUsd" class="amount" style="color:var(--success);">0.00</td>
+                            </tr>
+                            <tr style="background:var(--bg-card);font-size:0.82rem;color:var(--text-secondary);">
+                                <td colspan="2" style="text-align:right;">Totales Impositivos:</td>
+                                <td colspan="8"></td>
+                                <td colspan="2" style="font-size:0.8rem;">
+                                    <div style="display:flex;flex-direction:column;gap:2px;">
+                                        <span>IVA a Pagar: <strong id="pmTotalIvaAPagar" style="color:var(--primary-accent);">0.00</strong></span>
+                                        <span>Ret. IVA: <strong id="pmTotalRetIva" style="color:var(--danger);">0.00</strong></span>
+                                        <span>Ret. ISLR: <strong id="pmTotalRetIslr" style="color:var(--danger);">0.00</strong></span>
+                                    </div>
+                                </td>
                             </tr>
                         </tfoot>
                     </table>
@@ -1819,8 +1997,9 @@
                         <label style="font-weight:600;color:var(--primary-accent);">Monto Total Pagado (Banco):</label>
                         <div style="display: flex; gap: 0.5rem; align-items: stretch;">
                             <input type="number" id="pmMontoTotalReal" class="form-control" step="0.01" style="font-size:1.1rem;font-weight:bold;border-color:var(--primary-accent);" placeholder="0.00">
-                            <button type="button" class="btn btn-secondary" id="btnGlobalDynamicStatus" title="Recalcular Resumen Global" style="padding: 0 1rem;">
-                                <i data-lucide="calculator"></i>
+                            <button type="button" class="btn btn-secondary" id="btnGlobalDynamicStatus" title="Recalcular Resumen Global" style="padding: 0 1.5rem; display: flex; align-items: center; gap: 0.75rem; background: var(--bg-tertiary); border: 2px solid var(--primary-accent); height: 3.5rem; border-radius: var(--radius-md); transition: all 0.2s ease;">
+                                <i data-lucide="calculator" style="width:24px;height:24px;color:var(--primary-accent);"></i>
+                                <span style="font-size:1.05rem; font-weight:700; color:var(--text-primary);">RESUMEN GLOBAL PAGOS</span>
                             </button>
                         </div>
                         <span class="sub-text">Si es mayor al total de facturas, el excedente se registrará como Nota de Crédito.</span>
@@ -1863,7 +2042,7 @@
 
     <!-- Global Dynamic Invoice Summary Modal -->
     <div id="globalDynamicRecalculateModal" class="modal" style="z-index: 10040;">
-        <div class="modal-content glassmorphism" style="max-width: 900px; width: 95%;">
+        <div class="modal-content glassmorphism" style="max-width: 1600px; width: 85%;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
                 <h3 style="margin:0; color: var(--primary-accent); display:flex; align-items:center; gap:0.5rem;"><i data-lucide="calculator" size="20"></i> Recálculo Dinámico Global</h3>
                 <button class="btn-icon" onclick="closeGlobalDynamicRecalculateModal()"><i data-lucide="x"></i></button>
@@ -1876,6 +2055,7 @@
                             <th>Factura</th>
                             <th class="amount">Base Imp. Bs</th>
                             <th class="amount">IVA Bs</th>
+                            <th class="amount">IVA a Pagar</th>
                             <th class="amount">Exento Bs</th>
                             <th class="amount" style="color:var(--danger)">Ret. IVA Bs</th>
                             <th class="amount" style="color:var(--danger)">Ret. ISLR Bs</th>
@@ -1888,6 +2068,7 @@
                             <td>TOTALES</td>
                             <td id="gdobBase" class="amount">0.00</td>
                             <td id="gdobIva" class="amount">0.00</td>
+                            <td id="gdobIvaAPagar" class="amount">0.00</td>
                             <td id="gdobExento" class="amount">0.00</td>
                             <td id="gdobRetIva" class="amount" style="color:var(--danger)">0.00</td>
                             <td id="gdobRetIslr" class="amount" style="color:var(--danger)">0.00</td>
@@ -1957,6 +2138,10 @@
                             <span style="color: var(--text-secondary);">↳ IVA Retenido:</span>
                             <span id="dynIvaRetenido" style="text-align: right; font-weight: 600; color: var(--danger);">Bs 0.00</span>
                         </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; font-size: 0.85em; margin-top: 3px;">
+                            <span style="color: var(--text-secondary);">↳ ISLR Retenido:</span>
+                            <span id="dynRetenIslrBs" style="text-align: right; font-weight: 600; color: var(--danger);">Bs 0.00</span>
+                        </div>
                     </div>
 
                     <div style="color: var(--text-secondary);">Exento (Recalculado):</div>
@@ -2016,6 +2201,18 @@
                         <option value="Calculado">Calculado al vuelo (MtoTotal / Tasa)</option>
                         <option value="SACOMP">Monto Original de Base de Datos (SACOMP.MontoMEx)</option>
                     </select>
+                </div>
+                <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0;">
+                <h4 style="margin: 0;">Configuración ISLR</h4>
+                <div class="input-group">
+                    <label>Fuente para Tipo de Persona (ISLR)</label>
+                    <select id="cfgISLRPersonaSource" class="form-control">
+                        <option value="SAINT">SAINT (Automático por prefijo RIF desde SAPROV)</option>
+                        <option value="LOCAL">LOCAL (Configuración manual por proveedor)</option>
+                    </select>
+                    <small style="color:var(--text-secondary);font-size:0.78rem;margin-top:0.25rem;display:block;">
+                        SAINT: determina PJ/PN automáticamente del RIF en Saint. LOCAL: usa el campo manual de la config del proveedor.
+                    </small>
                 </div>
                 <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:1rem;">
                     <button type="button" class="btn btn-secondary" onclick="closeRetConfigModal()">Cancelar</button>
@@ -2086,6 +2283,73 @@
                 <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:0.5rem;">
                     <button type="button" class="btn btn-secondary" onclick="closeGenerarRetencionModal()">Cancelar</button>
                     <button type="submit" class="btn btn-primary"><i data-lucide="check"></i> Generar Comprobante</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Generar Retención ISLR Modal (Multi-Factura) -->
+    <div id="generarRetencionIslrModal" class="modal" style="z-index: 10025;">
+        <div class="modal-content glassmorphism" style="max-width: 1100px; width: 95%; max-height: 90vh; overflow-y: auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
+                <h2 style="margin:0;"><i data-lucide="file-text" style="width:20px;height:20px;vertical-align:middle;"></i> Generar Comprobante de Retención ISLR</h2>
+                <button class="btn-icon" onclick="closeGenerarRetencionIslrModal()"><i data-lucide="x"></i></button>
+            </div>
+
+            <div id="retenIslrWarningUT" style="display:none;margin-bottom:1rem;padding:0.8rem;background:rgba(234,179,8,0.1);border-left:4px solid #eab308;border-radius:4px;font-size:0.85rem;color:#eab308;"></div>
+
+            <form id="generarRetencionIslrForm" style="display:flex;flex-direction:column;gap:1rem;">
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+                    <div class="input-group">
+                        <label>Proveedor (RIF/Cód)</label>
+                        <input type="text" id="genRetIslrCodProv" class="form-control" readonly>
+                    </div>
+                    <div class="input-group">
+                        <label>Fecha Retención</label>
+                        <input type="date" id="genRetIslrFechaEmision" class="form-control" required>
+                    </div>
+                    <div class="input-group">
+                        <label>Concepto ISLR</label>
+                        <select id="genRetIslrConcepto" class="form-control">
+                            <option value="0">Sin Retención (0%)</option>
+                            <option value="0.01">Bienes / Compras (1%)</option>
+                            <option value="0.02">Servicios / Honorarios (2%)</option>
+                            <option value="0.03">Servicios / Honorarios (3%)</option>
+                            <option value="0.05">Alquileres (5%)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="max-height:390px;overflow-y:auto;border:1px solid var(--border-color);border-radius:8px;">
+                    <table class="data-table" style="margin:0;">
+                        <thead>
+                            <tr>
+                                <th>Factura</th>
+                                <th>Nro Control</th>
+                                <th>Monto Total Bs</th>
+                                <th>Base Imponible Bs</th>
+                                <th>Alícuota %</th>
+                                <th>Sustraendo Bs</th>
+                                <th>Monto Retenido ISLR Bs</th>
+                            </tr>
+                        </thead>
+                        <tbody id="genRetIslrInvoicesTable"></tbody>
+                        <tfoot>
+                            <tr style="background:var(--bg-tertiary);font-weight:bold;">
+                                <td colspan="2" style="text-align:right;">TOTALES:</td>
+                                <td id="genRetIslrTotalMonto" class="amount">0.00</td>
+                                <td id="genRetIslrTotalBase" class="amount">0.00</td>
+                                <td></td>
+                                <td id="genRetIslrTotalSustraendo" class="amount">0.00</td>
+                                <td id="genRetIslrTotalRetenido" class="amount" style="color:var(--danger);font-weight:bold;font-size:1.1rem;">0.00</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:0.5rem;">
+                    <button type="button" class="btn btn-secondary" onclick="closeGenerarRetencionIslrModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i data-lucide="check"></i> Generar Comprobante ISLR</button>
                 </div>
             </form>
         </div>
@@ -2186,9 +2450,25 @@
         </div>
     </div>
 
+    <div id="helpModal" class="modal" style="z-index: 10040;">
+        <div class="modal-content glass-card" style="max-width: 500px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+                <h2 style="margin:0;display:flex;align-items:center;gap:0.5rem;"><i data-lucide="help-circle"></i> Orientación de Estatus</h2>
+                <button class="btn-icon" onclick="closeHelpModal()"><i data-lucide="x"></i></button>
+            </div>
+            <div id="helpModalBody" style="line-height: 1.5; color: var(--text-primary); margin-top: 1rem; margin-bottom: 1rem;">
+                <!-- Content injected dynamically -->
+            </div>
+            <div class="modal-actions" style="margin-top: 1rem; text-align: right;">
+                <button class="primary-button glass" onclick="closeHelpModal()">Entendido</button>
+            </div>
+        </div>
+    </div>
+
     <datalist id="datalistProviders"></datalist>
 
-    <script src="script.js?v=22"></script>
+    <script src="script.js?v=25"></script>
+    <script src="modules-report.js?v=3"></script>
     <script>
         lucide.createIcons();
     </script>
