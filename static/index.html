@@ -1879,15 +1879,16 @@
                             </div>
                         </div>
 
-                        <div class="input-group" style="margin-top: 0.5rem;">
-                            <label>Referencia / Notas:</label>
-                            <input type="text" id="abReferencia" class="form-control"
-                                placeholder="Ej. Transf Banesco 1234...">
-                        </div>
-
-                        <div class="input-group" style="margin-top: 0.5rem;">
-                            <label>Soporte de Pago (Opcional):</label>
-                            <input type="file" id="abComprobante" class="form-control" accept="image/jpeg, application/pdf">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.5rem;">
+                            <div class="input-group">
+                                <label>Referencia / Notas:</label>
+                                <input type="text" id="abReferencia" class="form-control"
+                                    placeholder="Ej. Transf Banesco 1234...">
+                            </div>
+                            <div class="input-group">
+                                <label>Soporte de Pago (Opcional):</label>
+                                <input type="file" id="abComprobante" class="form-control" accept="image/jpeg, application/pdf">
+                            </div>
                         </div>
 
                         <div style="display: flex; align-items: center; gap: 1rem; margin-top: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap;">
@@ -1907,6 +1908,23 @@
                         </button>
                     </form>
                 </div>
+            </div>
+
+            <!-- Action Bar: On-the-fly operations -->
+            <div id="abActionBar" style="display: flex; gap: 0.75rem; margin-top: 1.5rem; padding: 1rem; background: rgba(255,255,255,0.02); border-radius: var(--radius-md); border: 1px solid var(--border-subtle); flex-wrap: wrap; align-items: center;">
+                <span style="font-weight: 600; margin-right: auto; color: var(--text-secondary);"><i data-lucide="zap" size="16" style="vertical-align:text-bottom;margin-right:4px;"></i> Acciones Directas:</span>
+                <button type="button" id="abBtnRetIva" class="btn btn-secondary" style="color: #eab308; border-color: rgba(234, 179, 8, 0.4); background: rgba(234, 179, 8, 0.05);">
+                    <i data-lucide="receipt" size="16"></i> Ret. IVA
+                </button>
+                <button type="button" id="abBtnRetIslr" class="btn btn-secondary" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.05);">
+                    <i data-lucide="file-text" size="16"></i> Ret. ISLR
+                </button>
+                <button type="button" id="abBtnNC" class="btn btn-secondary" style="color: #10b981; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.05);">
+                    <i data-lucide="file-plus" size="16"></i> Nota de Crédito
+                </button>
+                <button type="button" id="abBtnND" class="btn btn-secondary" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.05);">
+                    <i data-lucide="file-minus" size="16"></i> Nota de Débito
+                </button>
             </div>
 
             <!-- Bottom: History -->
@@ -1958,7 +1976,12 @@
                                 <th>Fecha Pago</th>
                                 <th>Tasa Emis.</th>
                                 <th><i data-lucide="calculator" size="16"></i></th>
-                                <th>Indexado</th>
+                                <th style="text-align:center;">
+                                    <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer;justify-content:center;" title="Aplicar/Quitar indexación a todas las facturas">
+                                        <input type="checkbox" id="pmIndexadoMaster">
+                                        <span style="font-size:0.75rem;">Indexado</span>
+                                    </label>
+                                </th>
                                 <th>P. Pago</th>
                                 <th>Desc.</th>
                                 <th>Tasa BCV</th>

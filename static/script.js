@@ -671,23 +671,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="amount us-amount">${usdFormatter(montoUsd)}</td>
                     <td>${getStatusHtml(item)}</td>
                     <td>
-                        <div style="display:flex; gap:0.4rem;">
-                            <button class="btn-icon" title="Gestionar Abonos" onclick="openAbonosPanel('${item.CodProv}', '${item.NumeroD}')">
-                                <i data-lucide="calculator" size="16"></i>
-                            </button>
-                            <button class="btn-icon" title="Generar Retenci&#243;n IVA" onclick="openRetencionFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#eab308;">
-                                <i data-lucide="receipt" size="16"></i>
-                            </button>
-                            <button class="btn-icon" title="Generar Retenci&#243;n ISLR" onclick="openRetencionIslrFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#ef4444;">
-                                <i data-lucide="file-text" size="16"></i>
-                            </button>
-                            <button class="btn-icon" title="Nota de Cr&#233;dito" onclick="openNCFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#10b981;">
-                                <i data-lucide="file-plus" size="16"></i>
-                            </button>
-                            <button class="btn-icon" title="Nota de D&#233;bito" onclick="openNDFromMain('${item.CodProv}', '${item.NumeroD}')" style="color:#ef4444;">
-                                <i data-lucide="file-minus" size="16"></i>
-                            </button>
-                        </div>
+                        <button class="btn-icon" title="Gestionar Pagos" onclick="openAbonosPanel('${item.CodProv}', '${item.NumeroD}')">
+                            <i data-lucide="calculator" size="16"></i>
+                        </button>
                     </td>
                 </tr>
             `;
@@ -1125,7 +1111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const ctrl = document.getElementById('regNdInputControl').value.trim();
         if (!num || !ctrl) return;
 
-        const selected = getSelectedDebitNotes();
+        let selected = window.onTheFlyND || getSelectedDebitNotes();
         if (selected.length === 0) return;
 
         // Asignar el monto exacto tipeado por el usuario en cada factura
@@ -1149,6 +1135,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             if (!res.ok) throw new Error("Error al registrar");
             closeRegisterDebitNoteModal();
+            window.onTheFlyND = null; // Clear state
             fetchDebitNotes();
         } catch (err) {
             console.error(err);
@@ -2821,6 +2808,62 @@ document.addEventListener('DOMContentLoaded', () => {
     const dynamicInvoiceStatusModal = document.getElementById('dynamicInvoiceStatusModal');
     window.closeDynamicInvoiceStatusModal = () => dynamicInvoiceStatusModal?.classList.remove('active');
 
+    // --- Action Bar Event Listeners ---
+    document.getElementById('abBtnRetIva')?.addEventListener('click', () => {
+        const codProv = abCodProv.value;
+        const numeroD = abNumeroD.value;
+        closeAbonosModal();
+        openRetencionFromMain(codProv, numeroD);
+    });
+
+    document.getElementById('abBtnRetIslr')?.addEventListener('click', () => {
+        const codProv = abCodProv.value;
+        const numeroD = abNumeroD.value;
+        closeAbonosModal();
+        openRetencionIslrFromMain(codProv, numeroD);
+    });
+
+    document.getElementById('abBtnNC')?.addEventListener('click', () => {
+        const codProv = abCodProv.value;
+        const numeroD = abNumeroD.value;
+        closeAbonosModal();
+        openNCFromMain(codProv, numeroD);
+    });
+
+    document.getElementById('abBtnND')?.addEventListener('click', () => {
+        const codProv = abCodProv.value;
+        const numeroD = abNumeroD.value;
+        closeAbonosModal();
+        if (window.currentNdDiff > 0) {
+            document.getElementById('regNdInputNumero').value = '';
+            document.getElementById('regNdInputControl').value = '';
+            
+            window.onTheFlyND = [{
+                CodProv: codProv,
+                NumeroD: numeroD,
+                _estimatedReten: window.currentNdDiff
+            }];
+            
+            const listContainer = document.getElementById('regNdFacturasContainer');
+            if (listContainer) {
+                listContainer.innerHTML = window.onTheFlyND.map((s, idx) => `
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem;">
+                        <div>
+                            <span style="font-size: 0.85rem; color: var(--text-secondary);">Factura:</span>
+                            <strong style="display: block;">${s.NumeroD}</strong>
+                        </div>
+                        <div>
+                            <span style="font-size: 0.85rem; color: var(--text-secondary);">V. Editable (Bs):</span>
+                            <input type="number" id="retenInput_${idx}" class="form-control" step="0.01" value="${s._estimatedReten.toFixed(2)}" required>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            document.getElementById('registerDebitNoteModal').classList.add('active');
+        } else {
+             openNDFromMain(codProv, numeroD);
+        }
+    });
 
     document.getElementById('btnDynamicInvoiceStatus')?.addEventListener('click', () => {
         if (!currentCxpStatus) {
@@ -2956,6 +2999,50 @@ document.addEventListener('DOMContentLoaded', () => {
         if (targetBs) {
             abMontoBs.value = targetBs;
             lastAutoFilledBs = targetBs;
+        }
+
+        updateActionBarState(d, fin);
+    };
+
+    const updateActionBarState = (cxp, fin) => {
+        const btnRetIva  = document.getElementById('abBtnRetIva');
+        const btnRetIslr = document.getElementById('abBtnRetIslr');
+        const btnND      = document.getElementById('abBtnND');
+
+        // Ret. IVA: solo si el documento tiene IVA y no se ha retenido antes
+        const hasIva = (parseFloat(cxp.TGravable) || 0) > 0 && (parseFloat(cxp.MtoTax) || 0) > 0;
+        const ivaYaRetenida = (parseFloat(cxp.RetencionIvaAbonada) || 0) > 0;
+        
+        if (btnRetIva) {
+            btnRetIva.disabled = !hasIva || ivaYaRetenida;
+            btnRetIva.title = !hasIva 
+                ? 'Este documento no incluye IVA' 
+                : ivaYaRetenida 
+                    ? 'Retención IVA ya registrada' 
+                    : 'Generar Retención IVA';
+        }
+
+        // Ret. ISLR: solo si no se ha retenido antes
+        const islrYaRetenida = (parseFloat(cxp.RetencionIslrAbonada) || 0) > 0;
+        if (btnRetIslr) {
+            btnRetIslr.disabled = islrYaRetenida;
+            btnRetIslr.title = islrYaRetenida 
+                ? 'Retención ISLR ya registrada' 
+                : 'Generar Retención ISLR';
+        }
+
+        if (btnND) {
+            const originalBsDebt = (Math.round(((fin.mtoTotalUsd - (parseFloat(cxp.TotalUsdAbonado) || 0)) * fin.historicalTasa) * 100) / 100);
+            const indexationDiff = fin.saldoTargetBs - originalBsDebt;
+            window.currentNdDiff = indexationDiff > 0 ? indexationDiff : 0; 
+            
+            if (indexationDiff > 0.01) {
+               btnND.style.boxShadow = '0 0 8px rgba(239, 68, 68, 0.6)';
+               btnND.title = `Indexación detectada: Bs ${indexationDiff.toFixed(2)}`;
+            } else {
+               btnND.style.boxShadow = 'none';
+               btnND.title = 'Generar Nota de Débito';
+            }
         }
     };
 
@@ -3330,6 +3417,22 @@ document.addEventListener('DOMContentLoaded', () => {
         let pmItems      = [];
         let pmCxpStatuses = {};       // keyed by NumeroD
         let lastProcessedPagos = [];  // saved after successful processing for re-send
+
+        // Global Action for Master Checkbox
+        document.getElementById('pmIndexadoMaster')?.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            const tbody = document.getElementById('pmTableBody');
+            if (tbody) {
+                tbody.querySelectorAll('tr').forEach(row => {
+                    const cb = row.querySelector('.pm-indexado');
+                    if (cb && !cb.disabled && cb.checked !== isChecked) {
+                        cb.checked = isChecked;
+                        pmCalcRow(row);
+                    }
+                });
+                pmRecalcTotals();
+            }
+        });
 
         const roundFixed = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
@@ -3722,6 +3825,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 } catch (e) { console.error(e); }
             }
             pmRecalcTotals();
+
+            // Sync master checkbox state with the first row (since mostly providers share the same setting)
+            const firstCb = tbody.querySelector('.pm-indexado');
+            const masterCb = document.getElementById('pmIndexadoMaster');
+            if (firstCb && masterCb) {
+                masterCb.checked = firstCb.checked;
+            }
         });
 
         // ── Submit ──────────────────────────────────────────────────────

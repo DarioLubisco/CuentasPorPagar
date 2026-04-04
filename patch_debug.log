@@ -356,3 +356,5 @@ pyodbc.IntegrityError: ('23000', "[23000] [Microsoft][ODBC Driver 17 for SQL Ser
 [PATCH SACOMP] Affected Rows: 1
 [2026-04-03 17:58:13] numeroD=64547738 cod_prov=J- 08518977-7 payload={'FechaE': '2026-02-23', 'FechaI': '2026-02-23', 'FechaV': '2026-03-16', 'Notas10': '', 'MontoFacturaBS': 4218.42, 'TGravable': 0, 'IVA': 0, 'Factor': 405.3518, 'MontoMEx': 10.4068, 'TotalPrd': 4218.42, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 4218.42, 'CodProv': 'J- 08518977-7'}
 [PATCH SACOMP] Affected Rows: 1
+[2026-04-03 21:53:00] numeroD=0000165785 cod_prov=J-40663222-8 payload={'FechaE': '2026-03-26', 'FechaI': '2026-03-26', 'FechaV': '2026-04-04', 'Notas10': '1', 'MontoFacturaBS': 26397.72, 'TGravable': 2868.8, 'IVA': 459.01, 'Factor': 466.6014, 'MontoMEx': 56.5745, 'TotalPrd': 26397.72, 'Fletes': 0, 'Descto1': 0, 'Descto2': 0, 'Contado': 0, 'Credito': 26397.72, 'CodProv': 'J-40663222-8'}
+[PATCH SACOMP] Affected Rows: 1
