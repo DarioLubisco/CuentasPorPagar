@@ -2673,18 +2673,30 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
 
-    // ── Motivos de Ajuste: cargar y mostrar/ocultar ─────────────────────────
+    // ── Motivos de Ajuste y Notas de Crédito: cargar ─────────────────────────
+    window.motivosNC = [];
     const loadMotivosAjuste = async () => {
         try {
             const res = await fetch('/api/procurement/motivos-ajuste?solo_activos=true');
             if (!res.ok) return;
             const { data } = await res.json();
-            const opts = data.map(m => `<option value="${m.MotivoID}">[${m.Codigo}] ${m.Descripcion}</option>`).join('');
+            
+            const ajustes = data.filter(m => m.ParaAjuste);
+            window.motivosNC = data.filter(m => m.ParaNotaCredito);
+
+            const optsAjuste = ajustes.map(m => `<option value="${m.MotivoID}">[${m.Codigo}] ${m.Descripcion}</option>`).join('');
             ['abMotivoAjuste', 'pmMotivoAjuste'].forEach(id => {
                 const sel = document.getElementById(id);
-                if (sel) sel.innerHTML = '<option value="">— Seleccione Motivo —</option>' + opts;
+                if (sel) sel.innerHTML = '<option value="">— Seleccione Motivo —</option>' + optsAjuste;
             });
-        } catch(e) { console.warn('No se pudieron cargar motivos de ajuste', e); }
+
+            // If the note of credit modal is active, we can populate its dropdown too
+            const drpnc = document.getElementById('cncMotivo'); // we'll need to check the actual ID of the NC dropdown
+            if (drpnc) {
+                const optsNC = window.motivosNC.map(m => `<option value="${m.Descripcion}">${m.Descripcion}</option>`).join('');
+                drpnc.innerHTML = optsNC;
+            }
+        } catch(e) { console.warn('No se pudieron cargar motivos', e); }
     };
 
     // Toggle motivo row visibility
@@ -4416,8 +4428,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const retConfigModal = document.getElementById('retConfigModal');
         const retConfigForm = document.getElementById('retConfigForm');
 
-        document.getElementById('configRetencionesBtn')?.addEventListener('click', async () => {
+        window.openRetConfigModal = async () => {
             forceShowModal(retConfigModal);
+            if (typeof switchSettingsTab === 'function') switchSettingsTab('financiero');
             try {
                 const res = await fetch('/api/retenciones/config');
                 const { data } = await res.json();
@@ -4428,14 +4441,75 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('cfgProximoSecuencial').value = data.ProximoSecuencial || 1;
                 document.getElementById('cfgTasaEmisionSource').value = data.TasaEmisionSource || 'SACOMP';
                 document.getElementById('cfgMontoUsdSource').value = data.MontoUSDSource || 'Calculado';
-                // Load ISLRPersonaSource from global settings
                 if (document.getElementById('cfgISLRPersonaSource')) {
                     document.getElementById('cfgISLRPersonaSource').value = window.globalRetConfig?.ISLRPersonaSource || 'SAINT';
                 }
+                loadMotivosConfig();
             } catch (e) {
                 console.error('Error fetching config', e);
             }
+        };
+
+        document.getElementById('configRetencionesBtn')?.addEventListener('click', openRetConfigModal);
+
+        window.switchSettingsTab = (tabId) => {
+            document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.settings-pane').forEach(p => p.classList.remove('active'));
+            document.querySelector(`.settings-tab[onclick*="${tabId}"]`)?.classList.add('active');
+            document.getElementById(`pane-${tabId}`)?.classList.add('active');
+        };
+
+        window.loadMotivosConfig = async () => {
+            const tbody = document.getElementById('motivosConfigTableBody');
+            if (!tbody) return;
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Cargando...</td></tr>';
+            try {
+                const res = await fetch('/api/procurement/motivos-ajuste?solo_activos=false');
+                const { data } = await res.json();
+                tbody.innerHTML = data.map(m => `
+                    <tr style="opacity: ${m.Activo ? '1' : '0.5'};">
+                        <td>${m.Codigo}</td>
+                        <td>${m.Descripcion} ${m.Activo ? '' : '(Inactivo)'}</td>
+                        <td style="text-align:center;">${m.ParaAjuste ? '✅' : '—'}</td>
+                        <td style="text-align:center;">${m.ParaNotaCredito ? '✅' : '—'}</td>
+                        <td style="text-align:center;">
+                            ${m.Activo ? `<button class="btn-icon" onclick="deleteMotivoConfig(${m.MotivoID})" style="color:var(--danger);" title="Desactivar"><i data-lucide="trash-2" style="width:16px;height:16px;"></i></button>` : ''}
+                        </td>
+                    </tr>
+                `).join('');
+                if (data.length === 0) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No hay motivos configurados.</td></tr>';
+                if (window.lucide) lucide.createIcons();
+            } catch (err) {
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:red;">Error al cargar.</td></tr>';
+            }
+        };
+
+        document.getElementById('addMotivoForm')?.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const payload = {
+                Codigo: document.getElementById('newMcCodigo').value,
+                Descripcion: document.getElementById('newMcDesc').value,
+                ParaAjuste: document.getElementById('newMcAjuste').checked,
+                ParaNotaCredito: document.getElementById('newMcNC').checked,
+                Activo: true
+            };
+            try {
+                await fetch('/api/procurement/motivos-ajuste', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                document.getElementById('addMotivoForm').reset();
+                document.getElementById('newMcAjuste').checked = true;
+                loadMotivosConfig();
+            } catch (err) { showToast('Error al añadir motivo', 'error'); }
         });
+
+        window.deleteMotivoConfig = async (id) => {
+            if (!confirm('¿Desactivar este motivo?')) return;
+            try {
+                await fetch(`/api/procurement/motivos-ajuste/${id}`, { method: 'DELETE' });
+                loadMotivosConfig();
+            } catch (err) { showToast('Error al desactivar', 'error'); }
+        };
 
         window.closeRetConfigModal = () => forceHideModal(retConfigModal);
 

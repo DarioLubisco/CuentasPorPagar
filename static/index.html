@@ -135,7 +135,7 @@
                             <i data-lucide="landmark" style="width:14px;height:14px;"></i>
                             <span>Impuestos (SEDEMATRI)</span>
                         </a>
-                        <a href="#settings" class="nav-item nav-item-sub" data-view="settings">
+                        <a href="javascript:void(0)" class="nav-item nav-item-sub" id="sidebarSettingsBtn" onclick="openRetConfigModal()">
                             <i data-lucide="settings" style="width:14px;height:14px;"></i>
                             <span>Configuración General</span>
                         </a>
@@ -1697,9 +1697,7 @@
                 <div class="input-group">
                     <label>Motivo:</label>
                     <select id="cncMotivo" class="form-control" required>
-                        <option value="PAGO_EXCESO">Pago en Exceso</option>
-                        <option value="DEVOLUCION_PARCIAL">Devolución Parcial</option>
-                        <option value="OTROS">Otros</option>
+                        <option value="">— Seleccione Motivo —</option>
                     </select>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
@@ -2252,67 +2250,111 @@
         </div>
     </div>
 
-    <!-- Retenciones Config Modal -->
+    <!-- Configuracion Global Modal -->
     <div id="retConfigModal" class="modal" style="z-index: 10020;">
-        <div class="modal-content glassmorphism" style="max-width: 500px;">
+        <div class="modal-content glassmorphism" style="max-width: 650px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1.2rem;">
-                <h2 style="margin:0;"><i data-lucide="settings" style="width:20px;height:20px;vertical-align:middle;"></i> Configuración Retenciones</h2>
+                <h2 style="margin:0;"><i data-lucide="settings" style="width:20px;height:20px;vertical-align:middle;"></i> Configuración del Sistema</h2>
                 <button class="btn-icon" onclick="closeRetConfigModal()"><i data-lucide="x"></i></button>
             </div>
-            <form id="retConfigForm" style="display:flex;flex-direction:column;gap:1rem;">
-                <div class="input-group">
-                    <label>RIF Agente (sin guiones)</label>
-                    <input type="text" id="cfgRifAgente" class="form-control" required>
+            
+            <style>
+                .settings-tabs { display: flex; gap: 1rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1rem; }
+                .settings-tab { padding: 0.5rem 1rem; cursor: pointer; color: var(--text-secondary); border-bottom: 2px solid transparent; font-weight: 500; }
+                .settings-tab.active { color: var(--primary-accent); border-bottom-color: var(--primary-accent); }
+                .settings-pane { display: none; }
+                .settings-pane.active { display: block; }
+            </style>
+
+            <div class="settings-tabs" id="settingsTabsContainer">
+                <div class="settings-tab active" onclick="switchSettingsTab('financiero')">Finanzas y Retenciones</div>
+                <div class="settings-tab" onclick="switchSettingsTab('motivos')">Motivos (Ajustes / N.Crédito)</div>
+            </div>
+
+            <div id="pane-financiero" class="settings-pane active">
+                <form id="retConfigForm" style="display:flex;flex-direction:column;gap:1rem;">
+                    <div class="input-group">
+                        <label>RIF Agente (sin guiones)</label>
+                        <input type="text" id="cfgRifAgente" class="form-control" required>
+                    </div>
+                    <div class="input-group">
+                        <label>Nombre / Razón Social</label>
+                        <input type="text" id="cfgNombreAgente" class="form-control" required>
+                    </div>
+                    <div class="input-group">
+                        <label>Dirección Fiscal</label>
+                        <input type="text" id="cfgDireccionAgente" class="form-control">
+                    </div>
+                    <div class="input-group">
+                        <label>Valor UT (Bs)</label>
+                        <input type="number" id="cfgValorUT" class="form-control" step="0.01" min="0" required>
+                    </div>
+                    <div class="input-group">
+                        <label>Último Secuencial</label>
+                        <input type="number" id="cfgProximoSecuencial" class="form-control" min="0" value="0">
+                    </div>
+                    <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0;">
+                    <h4 style="margin: 0;">Parametrización Global de Pagos</h4>
+                    <div class="input-group">
+                        <label>Origen de Tasa de Emisión (Para cálculo USD Histórico)</label>
+                        <select id="cfgTasaEmisionSource" class="form-control">
+                            <option value="SACOMP">SACOMP.Factor (De la Factura)</option>
+                            <option value="DolarToday">DolarToday (Fecha Emisión)</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Modo de Cálculo Monto USD</label>
+                        <select id="cfgMontoUsdSource" class="form-control">
+                            <option value="Calculado">Calculado al vuelo (MtoTotal / Tasa)</option>
+                            <option value="SACOMP">Monto Original de Base de Datos (SACOMP.MontoMEx)</option>
+                        </select>
+                    </div>
+                    <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0;">
+                    <h4 style="margin: 0;">Configuración ISLR</h4>
+                    <div class="input-group">
+                        <label>Fuente para Tipo de Persona (ISLR)</label>
+                        <select id="cfgISLRPersonaSource" class="form-control">
+                            <option value="SAINT">SAINT (Automático por prefijo RIF desde SAPROV)</option>
+                            <option value="LOCAL">LOCAL (Configuración manual por proveedor)</option>
+                        </select>
+                        <small style="color:var(--text-secondary);font-size:0.78rem;margin-top:0.25rem;display:block;">
+                            SAINT: determina PJ/PN automáticamente del RIF en Saint. LOCAL: usa el campo manual de la config del proveedor.
+                        </small>
+                    </div>
+                    <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:1rem;">
+                        <button type="button" class="btn btn-secondary" onclick="closeRetConfigModal()">Cerrar</button>
+                        <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar Parametría</button>
+                    </div>
+                </form>
+            </div>
+
+            <div id="pane-motivos" class="settings-pane">
+                <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:1rem;">Gestione los motivos disponibles en los desplegables de Ajuste Contable y Módulo de Notas de Crédito.</p>
+                <form id="addMotivoForm" style="display:grid;grid-template-columns:1fr 2fr auto auto auto auto;gap:0.5rem;align-items:end;margin-bottom:1rem;background:var(--bg-tertiary);padding:0.75rem;border-radius:6px;border:1px solid var(--border-color);">
+                    <div class="input-group" style="margin:0;"><label style="font-size:0.75rem;">Código</label><input type="text" id="newMcCodigo" class="form-control" style="padding:0.3rem;" required></div>
+                    <div class="input-group" style="margin:0;"><label style="font-size:0.75rem;">Descripción</label><input type="text" id="newMcDesc" class="form-control" style="padding:0.3rem;" required></div>
+                    <label style="font-size:0.75rem;display:flex;flex-direction:column;align-items:center;cursor:pointer;">Ajuste<input type="checkbox" id="newMcAjuste" style="margin-top:4px;" checked></label>
+                    <label style="font-size:0.75rem;display:flex;flex-direction:column;align-items:center;cursor:pointer;">N.Crédito<input type="checkbox" id="newMcNC" style="margin-top:4px;"></label>
+                    <button type="submit" class="btn btn-primary" style="padding:0.4rem 0.75rem;align-self:end;height:31px;" title="Agregar"><i data-lucide="plus"></i></button>
+                </form>
+
+                <div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px;">
+                    <table class="data-table" style="margin: 0; font-size: 0.9rem;">
+                        <thead style="position: sticky; top: 0; background: var(--bg-secondary); z-index: 10;">
+                            <tr>
+                                <th>Cód.</th>
+                                <th>Descripción del Motivo</th>
+                                <th style="text-align:center;">¿Para Ajuste?</th>
+                                <th style="text-align:center;">¿Para NC?</th>
+                                <th style="text-align:center;">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="motivosConfigTableBody">
+                            <tr><td colspan="5" style="text-align:center;">Cargando...</td></tr>
+                        </tbody>
+                    </table>
                 </div>
-                <div class="input-group">
-                    <label>Nombre / Razón Social</label>
-                    <input type="text" id="cfgNombreAgente" class="form-control" required>
-                </div>
-                <div class="input-group">
-                    <label>Dirección Fiscal</label>
-                    <input type="text" id="cfgDireccionAgente" class="form-control">
-                </div>
-                <div class="input-group">
-                    <label>Valor UT (Bs)</label>
-                    <input type="number" id="cfgValorUT" class="form-control" step="0.01" min="0" required>
-                </div>
-                <div class="input-group">
-                    <label>Último Secuencial</label>
-                    <input type="number" id="cfgProximoSecuencial" class="form-control" min="0" value="0">
-                </div>
-                <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0;">
-                <h4 style="margin: 0;">Parametrización Global de Pagos</h4>
-                <div class="input-group">
-                    <label>Origen de Tasa de Emisión (Para cálculo USD Histórico)</label>
-                    <select id="cfgTasaEmisionSource" class="form-control">
-                        <option value="SACOMP">SACOMP.Factor (De la Factura)</option>
-                        <option value="DolarToday">DolarToday (Fecha Emisión)</option>
-                    </select>
-                </div>
-                <div class="input-group">
-                    <label>Modo de Cálculo Monto USD</label>
-                    <select id="cfgMontoUsdSource" class="form-control">
-                        <option value="Calculado">Calculado al vuelo (MtoTotal / Tasa)</option>
-                        <option value="SACOMP">Monto Original de Base de Datos (SACOMP.MontoMEx)</option>
-                    </select>
-                </div>
-                <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 0.5rem 0;">
-                <h4 style="margin: 0;">Configuración ISLR</h4>
-                <div class="input-group">
-                    <label>Fuente para Tipo de Persona (ISLR)</label>
-                    <select id="cfgISLRPersonaSource" class="form-control">
-                        <option value="SAINT">SAINT (Automático por prefijo RIF desde SAPROV)</option>
-                        <option value="LOCAL">LOCAL (Configuración manual por proveedor)</option>
-                    </select>
-                    <small style="color:var(--text-secondary);font-size:0.78rem;margin-top:0.25rem;display:block;">
-                        SAINT: determina PJ/PN automáticamente del RIF en Saint. LOCAL: usa el campo manual de la config del proveedor.
-                    </small>
-                </div>
-                <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:1rem;margin-top:1rem;">
-                    <button type="button" class="btn btn-secondary" onclick="closeRetConfigModal()">Cancelar</button>
-                    <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar</button>
-                </div>
-            </form>
+            </div>
         </div>
     </div>
 
@@ -2561,8 +2603,8 @@
 
     <datalist id="datalistProviders"></datalist>
 
-    <script src="script.js?v=45"></script>
-    <script src="modules-report.js?v=45"></script>
+    <script src="script.js?v=48.1"></script>
+    <script src="modules-report.js?v=48.1"></script>
     <script>
         lucide.createIcons();
     </script>

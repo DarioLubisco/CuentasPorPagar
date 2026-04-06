@@ -323,8 +323,9 @@ async def get_cuentas_por_pagar(search: str = Query("", description="Search term
               SACOMP.Descto1,
               SACOMP.Descto2,
               SACOMP.Fletes,
+              inv_set.AplicaIndexacion AS AplicaIndexacionOverride,
               SAPAGCXP.NumeroD AS NumeroD_SAPAGCXP,
-              dt_emision.dolarbcv AS TasaEmision,
+              CASE WHEN ISNULL(SAACXP.Factor, 0) > 1 THEN SAACXP.Factor ELSE dt_emision.dolarbcv END AS TasaEmision,
               dt_actual.dolarbcv AS TasaActual,
               PP.ID AS Plan_ID,
               PP.Banco AS Plan_Banco,
@@ -352,6 +353,7 @@ async def get_cuentas_por_pagar(search: str = Query("", description="Search term
             LEFT OUTER JOIN dbo.SAPROV ON SAACXP.CodProv = SAPROV.CodProv
             LEFT OUTER JOIN dbo.SAIPACXP ON SAACXP.NroUnico = SAIPACXP.NroUnico
             LEFT OUTER JOIN dbo.SACOMP ON SAACXP.NumeroD = SACOMP.NumeroD AND SAACXP.CodProv = SACOMP.CodProv
+            LEFT OUTER JOIN EnterpriseAdmin_AMC.Procurement.InvoiceSettings inv_set ON SAACXP.CodProv = inv_set.CodProv AND SAACXP.NumeroD = inv_set.NumeroD
             OUTER APPLY (
                 SELECT TOP 1 dolarbcv 
                 FROM EnterpriseAdmin_AMC.dbo.dolartoday 
@@ -750,7 +752,7 @@ async def get_motivos_ajuste(solo_activos: bool = True):
     try:
         conn = database.get_db_connection()
         cursor = conn.cursor()
-        query = "SELECT MotivoID, Codigo, Descripcion, AnulaNotaDebito, AnulaNotaCredito, Activo FROM EnterpriseAdmin_AMC.Procurement.MotivosAjuste"
+        query = "SELECT MotivoID, Codigo, Descripcion, AnulaNotaDebito, AnulaNotaCredito, ParaAjuste, ParaNotaCredito, Activo FROM EnterpriseAdmin_AMC.Procurement.MotivosAjuste"
         if solo_activos:
             query += " WHERE Activo = 1"
         query += " ORDER BY Codigo"
@@ -760,6 +762,8 @@ async def get_motivos_ajuste(solo_activos: bool = True):
         for r in rows:
             r['AnulaNotaDebito']  = bool(r['AnulaNotaDebito'])
             r['AnulaNotaCredito'] = bool(r['AnulaNotaCredito'])
+            r['ParaAjuste']       = bool(r['ParaAjuste'])
+            r['ParaNotaCredito']  = bool(r['ParaNotaCredito'])
             r['Activo']           = bool(r['Activo'])
         return {"data": rows}
     except Exception as e:
@@ -779,22 +783,24 @@ async def upsert_motivo_ajuste(payload: dict = Body(...)):
         descripcion = payload.get("Descripcion", "")
         anula_nd    = 1 if payload.get("AnulaNotaDebito",  False) else 0
         anula_nc    = 1 if payload.get("AnulaNotaCredito", False) else 0
+        para_ajuste = 1 if payload.get("ParaAjuste", True) else 0
+        para_nc     = 1 if payload.get("ParaNotaCredito", False) else 0
         activo      = 1 if payload.get("Activo", True)           else 0
 
         if motivo_id:
             cursor.execute("""
                 UPDATE EnterpriseAdmin_AMC.Procurement.MotivosAjuste
-                SET Codigo = ?, Descripcion = ?, AnulaNotaDebito = ?, AnulaNotaCredito = ?, Activo = ?
+                SET Codigo = ?, Descripcion = ?, AnulaNotaDebito = ?, AnulaNotaCredito = ?, ParaAjuste = ?, ParaNotaCredito = ?, Activo = ?
                 WHERE MotivoID = ?
-            """, (codigo, descripcion, anula_nd, anula_nc, activo, motivo_id))
+            """, (codigo, descripcion, anula_nd, anula_nc, para_ajuste, para_nc, activo, motivo_id))
             msg = "Motivo actualizado."
         else:
             cursor.execute("""
                 INSERT INTO EnterpriseAdmin_AMC.Procurement.MotivosAjuste
-                    (Codigo, Descripcion, AnulaNotaDebito, AnulaNotaCredito, Activo)
+                    (Codigo, Descripcion, AnulaNotaDebito, AnulaNotaCredito, ParaAjuste, ParaNotaCredito, Activo)
                 OUTPUT INSERTED.MotivoID
-                VALUES (?, ?, ?, ?, ?)
-            """, (codigo, descripcion, anula_nd, anula_nc, activo))
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (codigo, descripcion, anula_nd, anula_nc, para_ajuste, para_nc, activo))
             motivo_id = cursor.fetchone()[0]
             msg = "Motivo creado."
 
@@ -1110,46 +1116,6 @@ async def registrar_abono(
             cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET Saldo = Saldo - ? WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (monto_total_reducir, NumeroD, CodProv))
         cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAPROV SET Saldo = Saldo - ? WHERE CodProv = ?", (monto_total_reducir, CodProv))
 
-        # Enviar correo si corresponde (notificar o force_send)
-        if notificar == 1 or force == 1:
-            cursor.execute("""
-                SELECT c.Email, p.Descrip 
-                FROM EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones c 
-                LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV p ON c.CodProv = p.CodProv 
-                WHERE c.CodProv = ?
-            """, (CodProv,))
-            row = cursor.fetchone()
-            if row and row.Email:
-                pago_data = {
-                    "NumeroD": NumeroD,
-                    "CodProv": CodProv,
-                    "FechaAbono": FechaAbono,
-                    "MontoBsAbonado": MontoBsAbonado,
-                    "MontoUsdAbonado": MontoUsdAbonado,
-                    "TasaCambioDiaAbono": TasaCambioDiaAbono,
-                    "AplicaIndexacion": "Sí" if AplicaIndexacion.lower() == 'true' else "No",
-                    "Referencia": Referencia
-                }
-                email_sent = enviar_correo_pago(row.Email, row.Descrip or "Proveedor", NumeroD, pago_data, filepath)
-                logging.info(f"Email sent flag: {email_sent}")
-            else:
-                logging.warning(f"No notification sent: missing email or provider logic cod={CodProv}")
-
-        # Phase 5: Excess payment as Credit Note
-        excedente = MontoTotalPagado - MontoBsAbonado
-        if excedente > 0.01:
-            cursor.execute("""
-                INSERT INTO EnterpriseAdmin_AMC.Procurement.CreditNotesTracking
-                (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Estatus, Observacion)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                CodProv, NumeroD, 'PAGO_EXCESO',
-                excedente, TasaCambioDiaAbono,
-                excedente / TasaCambioDiaAbono if TasaCambioDiaAbono > 0 else 0,
-                'PENDIENTE',
-                f"Excedente de pago factura {NumeroD}"
-            ))
-
         # Phase 11: Auto-generate Debit Note for Indexation Discrepancies
         if aplica_idx == 1:
             cursor.execute("SELECT Monto FROM EnterpriseAdmin_AMC.dbo.SAACXP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (NumeroD, CodProv))
@@ -1174,11 +1140,95 @@ async def registrar_abono(
                         ))
 
         conn.commit()
+
+        # Phase 5: Excess payment as Credit Note
+        excedente = MontoTotalPagado - MontoBsAbonado
+        if excedente > 0.01:
+            try:
+                conn_nc = database.get_db_connection()
+                cursor_nc = conn_nc.cursor()
+                cursor_nc.execute("""
+                    INSERT INTO EnterpriseAdmin_AMC.Procurement.CreditNotesTracking
+                    (CodProv, NumeroD, Motivo, MontoBs, TasaCambio, MontoUsd, Estatus, Observacion)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    CodProv, NumeroD, 'PAGO_EXCESO',
+                    excedente, TasaCambioDiaAbono,
+                    excedente / TasaCambioDiaAbono if TasaCambioDiaAbono > 0 else 0,
+                    'PENDIENTE',
+                    f"Excedente de pago factura {NumeroD}"
+                ))
+                conn_nc.commit()
+                conn_nc.close()
+            except Exception as e_nc:
+                logging.error(f"Error creating auto-credit note: {e_nc}")
+
+        # Enviar correo si corresponde (notificar o force_send) - DESPUES DEL COMMIT para evitar bloqueos
+        if notificar == 1 or force == 1:
+            cursor.execute("""
+                SELECT c.Email, p.Descrip 
+                FROM EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones c 
+                LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV p ON c.CodProv = p.CodProv 
+                WHERE c.CodProv = ?
+            """, (CodProv,))
+            row = cursor.fetchone()
+            if row and row.Email:
+                pago_data = {
+                    "NumeroD": NumeroD,
+                    "CodProv": CodProv,
+                    "FechaAbono": FechaAbono,
+                    "MontoBsAbonado": MontoBsAbonado,
+                    "MontoUsdAbonado": MontoUsdAbonado,
+                    "TasaCambioDiaAbono": TasaCambioDiaAbono,
+                    "AplicaIndexacion": "Sí" if AplicaIndexacion.lower() == 'true' else "No",
+                    "Referencia": Referencia
+                }
+                email_sent = enviar_correo_pago(row.Email, row.Descrip or "Proveedor", NumeroD, pago_data, filepath)
+                logging.info(f"Email sent flag: {email_sent}")
+            else:
+                logging.warning(f"No notification sent: missing email or provider logic cod={CodProv}")
+
         return {"message": "Abono registrado exitosamente.", "email_sent": (notificar == 1 or force == 1)}
     except Exception as e:
         logging.error(f"Error registering abono: {e}", exc_info=True)
         if 'conn' in locals():
             conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
+
+@app.post("/api/procurement/invoice-settings")
+async def update_invoice_settings(
+    NumeroD: str = Form(...),
+    CodProv: str = Form(...),
+    AplicaIndexacion: bool = Form(...)
+):
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            IF EXISTS (SELECT 1 FROM EnterpriseAdmin_AMC.Procurement.InvoiceSettings WHERE NumeroD = ? AND CodProv = ?)
+            BEGIN
+                UPDATE EnterpriseAdmin_AMC.Procurement.InvoiceSettings 
+                SET AplicaIndexacion = ?, UpdatedAt = GETDATE()
+                WHERE NumeroD = ? AND CodProv = ?
+            END
+            ELSE
+            BEGIN
+                INSERT INTO EnterpriseAdmin_AMC.Procurement.InvoiceSettings (NumeroD, CodProv, AplicaIndexacion)
+                VALUES (?, ?, ?)
+            END
+        """, (NumeroD, CodProv, 1 if AplicaIndexacion else 0, NumeroD, CodProv, NumeroD, CodProv, 1 if AplicaIndexacion else 0))
+        
+        conn.commit()
+        return {"data": "ok"}
+    except Exception as e:
+        if 'conn' in locals():
+            conn.rollback()
+        logging.error(f"Error updating invoice indexation settings: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if 'conn' in locals():
@@ -1507,7 +1557,8 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...),
                 ISNULL(cond.DecimalesTasa, 4) AS DecimalesTasa,
                 prov.Descrip AS ProveedorNombre,
                 prov.NumeroUP, prov.FechaUP, prov.MontoUP,
-                dt_emision.dolarbcv AS TasaEmision,
+                dt_emision.dolarbcv AS TasaEmisionCalculada,
+                CASE WHEN ISNULL(cxp.Factor, 0) > 1 THEN cxp.Factor ELSE dt_emision.dolarbcv END AS TasaEmision,
                 ISNULL(abonos.TotalUsdAbonado, 0) AS TotalUsdAbonado,
                 ISNULL(abonos.TotalBsAbonado, 0) AS TotalBsAbonado,
                 ISNULL(abonos.TotalIVA, 0) AS RetencionIvaAbonada,
@@ -1522,11 +1573,13 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...),
                          WHEN LEFT(LTRIM(ISNULL(prov.ID3,'')),1) IN ('V','E','P') THEN 'PN'
                          ELSE NULL END
                 ) AS TipoPersona,
-                cond.TipoPersona AS TipoPersonaLocal
+                cond.TipoPersona AS TipoPersonaLocal,
+                inv_set.AplicaIndexacion AS AplicaIndexacionOverride
             FROM dbo.SAACXP cxp
             LEFT JOIN dbo.SACOMP comp ON cxp.CodProv = comp.CodProv AND cxp.NumeroD = comp.NumeroD
             LEFT JOIN dbo.SAPROV prov ON cxp.CodProv = prov.CodProv
             LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones cond ON cxp.CodProv = cond.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.InvoiceSettings inv_set ON cxp.CodProv = inv_set.CodProv AND cxp.NumeroD = inv_set.NumeroD
             OUTER APPLY (
                 SELECT SUM(MontoUsdAbonado) as TotalUsdAbonado, SUM(MontoBsAbonado) as TotalBsAbonado,
                        SUM(CASE WHEN TipoAbono = 'RETENCION_IVA' THEN MontoBsAbonado ELSE 0 END) AS TotalIVA,
