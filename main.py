@@ -54,9 +54,10 @@ app = FastAPI(title="Cuentas Por Pagar API")
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
+import time
 @app.get("/")
 async def root():
-    return RedirectResponse(url="/static/index.html")
+    return RedirectResponse(url=f"/static/index.html?v={int(time.time())}")
 
 class PlanPagoRequest(BaseModel):
     nros_unicos: List[int]
@@ -102,7 +103,8 @@ class ProveedorCondicion(BaseModel):
     ProntoPago2_Dias: Optional[int] = 0
     ProntoPago2_Pct: Optional[float] = 0.0
     Email: Optional[str] = None
-    TipoPersona: Optional[str] = None  # 'PJ' = Juridica, 'PN' = Natural, None = auto
+    TipoPersona: Optional[str] = None
+    DecimalesTasa: Optional[int] = 4  # 'PJ' = Juridica, 'PN' = Natural, None = auto
 
 class InvoiceReference(BaseModel):
     CodProv: str
@@ -465,6 +467,7 @@ async def get_provider_conditions():
                    ISNULL(c.ProntoPago2_Dias, 0) AS ProntoPago2_Dias, 
                    ISNULL(c.ProntoPago2_Pct, 0) AS ProntoPago2_Pct,
                    ISNULL(c.IndexaIVA, 1) AS IndexaIVA,
+                   ISNULL(c.DecimalesTasa, 4) AS DecimalesTasa,
                    COALESCE(c.Email, p.Email, '') AS Email,
                    -- TipoPersona: LOCAL overrides SAINT derivation
                    COALESCE(
@@ -514,27 +517,27 @@ async def update_provider_condition(cod_prov: str, payload: ProveedorCondicion):
                 SET DiasNoIndexacion = ?, BaseDiasCredito = ?, DiasVencimiento = ?,
                     ProntoPago1_Dias = ?, ProntoPago1_Pct = ?,
                     ProntoPago2_Dias = ?, ProntoPago2_Pct = ?,
-                    Email = ?, TipoPersona = ?, IndexaIVA = ?
+                    Email = ?, TipoPersona = ?, IndexaIVA = ?, DecimalesTasa = ?
                 WHERE CodProv = ?
             """
             cursor.execute(update_query, (
                 payload.DiasNoIndexacion, payload.BaseDiasCredito, payload.DiasVencimiento,
                 payload.ProntoPago1_Dias, payload.ProntoPago1_Pct,
                 payload.ProntoPago2_Dias, payload.ProntoPago2_Pct,
-                payload.Email, tipo_pers, payload.IndexaIVA,
+                payload.Email, tipo_pers, payload.IndexaIVA, payload.DecimalesTasa,
                 cod_prov
             ))
         else:
             insert_query = """
                 INSERT INTO EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones 
-                (CodProv, DiasNoIndexacion, BaseDiasCredito, DiasVencimiento, ProntoPago1_Dias, ProntoPago1_Pct, ProntoPago2_Dias, ProntoPago2_Pct, Email, TipoPersona, IndexaIVA)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (CodProv, DiasNoIndexacion, BaseDiasCredito, DiasVencimiento, ProntoPago1_Dias, ProntoPago1_Pct, ProntoPago2_Dias, ProntoPago2_Pct, Email, TipoPersona, IndexaIVA, DecimalesTasa)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             cursor.execute(insert_query, (
                 cod_prov, payload.DiasNoIndexacion, payload.BaseDiasCredito, payload.DiasVencimiento,
                 payload.ProntoPago1_Dias, payload.ProntoPago1_Pct,
                 payload.ProntoPago2_Dias, payload.ProntoPago2_Pct,
-                payload.Email, tipo_pers, payload.IndexaIVA
+                payload.Email, tipo_pers, payload.IndexaIVA, payload.DecimalesTasa
             ))
             
         # Synchronize SAPROV native credit days
@@ -737,6 +740,88 @@ def safe_send_email(destinatario: str, proveedor_nombre: str, nro_factura: str, 
         logging.warning(f"Email send failed (likely offline): {e}")
         return False
 
+
+# ==============================================================================
+# MOTIVOS DE AJUSTE - CRUD
+# ==============================================================================
+@app.get("/api/procurement/motivos-ajuste")
+async def get_motivos_ajuste(solo_activos: bool = True):
+    """Lista todos los motivos de ajuste contable."""
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        query = "SELECT MotivoID, Codigo, Descripcion, AnulaNotaDebito, AnulaNotaCredito, Activo FROM EnterpriseAdmin_AMC.Procurement.MotivosAjuste"
+        if solo_activos:
+            query += " WHERE Activo = 1"
+        query += " ORDER BY Codigo"
+        cursor.execute(query)
+        columns = [c[0] for c in cursor.description]
+        rows = [dict(zip(columns, r)) for r in cursor.fetchall()]
+        for r in rows:
+            r['AnulaNotaDebito']  = bool(r['AnulaNotaDebito'])
+            r['AnulaNotaCredito'] = bool(r['AnulaNotaCredito'])
+            r['Activo']           = bool(r['Activo'])
+        return {"data": rows}
+    except Exception as e:
+        logging.error(f"Error get_motivos_ajuste: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.post("/api/procurement/motivos-ajuste")
+async def upsert_motivo_ajuste(payload: dict = Body(...)):
+    """Crea o actualiza un motivo de ajuste contable."""
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        motivo_id = payload.get("MotivoID")
+        codigo      = payload.get("Codigo", "")
+        descripcion = payload.get("Descripcion", "")
+        anula_nd    = 1 if payload.get("AnulaNotaDebito",  False) else 0
+        anula_nc    = 1 if payload.get("AnulaNotaCredito", False) else 0
+        activo      = 1 if payload.get("Activo", True)           else 0
+
+        if motivo_id:
+            cursor.execute("""
+                UPDATE EnterpriseAdmin_AMC.Procurement.MotivosAjuste
+                SET Codigo = ?, Descripcion = ?, AnulaNotaDebito = ?, AnulaNotaCredito = ?, Activo = ?
+                WHERE MotivoID = ?
+            """, (codigo, descripcion, anula_nd, anula_nc, activo, motivo_id))
+            msg = "Motivo actualizado."
+        else:
+            cursor.execute("""
+                INSERT INTO EnterpriseAdmin_AMC.Procurement.MotivosAjuste
+                    (Codigo, Descripcion, AnulaNotaDebito, AnulaNotaCredito, Activo)
+                OUTPUT INSERTED.MotivoID
+                VALUES (?, ?, ?, ?, ?)
+            """, (codigo, descripcion, anula_nd, anula_nc, activo))
+            motivo_id = cursor.fetchone()[0]
+            msg = "Motivo creado."
+
+        conn.commit()
+        return {"data": {"MotivoID": motivo_id}, "message": msg}
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        logging.error(f"Error upsert_motivo_ajuste: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.delete("/api/procurement/motivos-ajuste/{motivo_id}")
+async def delete_motivo_ajuste(motivo_id: int):
+    """Inhabilita (soft-delete) un motivo de ajuste."""
+    try:
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE EnterpriseAdmin_AMC.Procurement.MotivosAjuste SET Activo = 0 WHERE MotivoID = ?", (motivo_id,))
+        conn.commit()
+        return {"message": "Motivo inhabilitado."}
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
 @app.post("/api/procurement/abonos-batch", response_model=None)
 async def registrar_abonos_batch(
     pagos_json: str = Form(...),
@@ -787,10 +872,33 @@ async def registrar_abonos_batch(
                 tasa_orig, mto_orig
             ))
             
-            # Update SACOMP.MtoPagos and SAACXP.Saldo for consistency
             monto_abono = float(p.get('MontoBsAbonado', 0))
-            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET MtoPagos = ISNULL(MtoPagos, 0) + ? WHERE NumeroD = ? AND CodProv = ?", (monto_abono, p['NumeroD'], p['CodProv']))
-            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET Saldo = Saldo - ? WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (monto_abono, p['NumeroD'], p['CodProv']))
+            monto_ajuste = float(p.get('MontoAjusteBs', 0))
+            
+            if monto_ajuste > 0:
+                monto_abono += monto_ajuste
+                cursor.execute("SELECT ISNULL(MAX(AbonoID), 0) FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos")
+                max_abono_id2 = int(cursor.fetchone()[0]) + 1
+                tasa_dia = float(p.get('TasaCambioDiaAbono', 0))
+                motivo_ajuste_id = p.get('MotivoAjusteID') or None
+                cursor.execute("""
+                    INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
+                    (AbonoID, NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, RutaComprobante, NotificarCorreo, TasaCambioOrig, MontoMExOrig, TipoAbono, MotivoAjusteID)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'AJUSTE DE SISTEMA', NULL, 0, ?, ?, 'AJUSTE', ?)
+                """, (
+                    max_abono_id2, p['NumeroD'], p['CodProv'], p['FechaAbono'],
+                    monto_ajuste, tasa_dia, monto_ajuste / tasa_dia if tasa_dia > 0 else 0,
+                    aplica_idx, tasa_orig, mto_orig, motivo_ajuste_id
+                ))
+            
+            # Update SACOMP.MtoPagos and SAACXP.Saldo for consistency
+            nro_unico = p.get('NroUnico')
+            if nro_unico:
+                cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET MtoPagos = ISNULL(MtoPagos, 0) + ? WHERE NroUnico = (SELECT TOP 1 c.NroUnico FROM EnterpriseAdmin_AMC.dbo.SACOMP c JOIN EnterpriseAdmin_AMC.dbo.SAACXP x ON c.NumeroD = x.NumeroD AND c.CodProv = x.CodProv WHERE x.NroUnico = ?)", (monto_abono, nro_unico))
+                cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET Saldo = Saldo - ? WHERE NroUnico = ?", (monto_abono, nro_unico))
+            else:
+                cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET MtoPagos = ISNULL(MtoPagos, 0) + ? WHERE NumeroD = ? AND CodProv = ?", (monto_abono, p['NumeroD'], p['CodProv']))
+                cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET Saldo = Saldo - ? WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (monto_abono, p['NumeroD'], p['CodProv']))
             
             # Also update SAPROV.Saldo (Provider global balance tracking)
             cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAPROV SET Saldo = Saldo - ? WHERE CodProv = ?", (monto_abono, p['CodProv']))
@@ -914,7 +1022,12 @@ async def registrar_abono(
     NotificarCorreo: bool = Form(False),
     MontoTotalPagado: float = Form(0.0),
     force_send: bool = Form(False),
-    archivo: UploadFile = File(None)
+    archivo: UploadFile = File(None),
+    NroUnico: Optional[int] = Form(None),
+    MontoAjusteBs: Optional[float] = Form(None),
+    MotivoAjusteID: Optional[int] = Form(None),
+    MontoDescuentoBs: Optional[float] = Form(None),
+    MotivoDescuentoID: Optional[int] = Form(None)
 ):
     try:
         conn = database.get_db_connection()
@@ -953,10 +1066,49 @@ async def registrar_abono(
             filepath, notificar, tasa_orig, mto_orig
         ))
         
+        monto_total_reducir = MontoBsAbonado
+        
+        if MontoDescuentoBs and MontoDescuentoBs > 0:
+            # Registro informativo del descuento aplicado - NO afecta saldo (ya fue restado en la matemática del frontend)
+            cursor.execute("SELECT ISNULL(MAX(AbonoID), 0) FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos")
+            max_desc_id = int(cursor.fetchone()[0]) + 1
+            desc_motivo_id = MotivoDescuentoID or None
+            cursor.execute("""
+                INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
+                (AbonoID, NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado,
+                 AplicaIndexacion, Referencia, RutaComprobante, NotificarCorreo, TasaCambioOrig, MontoMExOrig, TipoAbono, MotivoAjusteID, AfectaSaldo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DESCUENTO APLICADO', NULL, 0, ?, ?, 'DESCUENTO', ?, 0)
+            """, (
+                max_desc_id, NumeroD, CodProv, FechaAbono,
+                MontoDescuentoBs, TasaCambioDiaAbono,
+                MontoDescuentoBs / TasaCambioDiaAbono if TasaCambioDiaAbono > 0 else 0,
+                aplica_idx, tasa_orig, mto_orig, desc_motivo_id
+            ))
+        
+        if MontoAjusteBs and MontoAjusteBs > 0:
+            monto_total_reducir += MontoAjusteBs
+            cursor.execute("SELECT ISNULL(MAX(AbonoID), 0) FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos")
+            max_abono_id2 = int(cursor.fetchone()[0]) + 1
+            insert_ajuste = """
+                INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
+                (AbonoID, NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, RutaComprobante, NotificarCorreo, TasaCambioOrig, MontoMExOrig, TipoAbono, MotivoAjusteID)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'AJUSTE DE SISTEMA', NULL, 0, ?, ?, 'AJUSTE', ?)
+            """
+            cursor.execute(insert_ajuste, (
+                max_abono_id2, NumeroD, CodProv, FechaAbono,
+                MontoAjusteBs, TasaCambioDiaAbono,
+                MontoAjusteBs / TasaCambioDiaAbono if TasaCambioDiaAbono > 0 else 0,
+                aplica_idx, tasa_orig, mto_orig, MotivoAjusteID
+            ))
+        
         # Update SACOMP.MtoPagos and SAACXP.Saldo for consistency
-        cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET MtoPagos = ISNULL(MtoPagos, 0) + ? WHERE NumeroD = ? AND CodProv = ?", (MontoBsAbonado, NumeroD, CodProv))
-        cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET Saldo = Saldo - ? WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (MontoBsAbonado, NumeroD, CodProv))
-        cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAPROV SET Saldo = Saldo - ? WHERE CodProv = ?", (MontoBsAbonado, CodProv))
+        if NroUnico:
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET MtoPagos = ISNULL(MtoPagos, 0) + ? WHERE NroUnico = (SELECT TOP 1 c.NroUnico FROM EnterpriseAdmin_AMC.dbo.SACOMP c JOIN EnterpriseAdmin_AMC.dbo.SAACXP x ON c.NumeroD = x.NumeroD AND c.CodProv = x.CodProv WHERE x.NroUnico = ?)", (monto_total_reducir, NroUnico))
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET Saldo = Saldo - ? WHERE NroUnico = ?", (monto_total_reducir, NroUnico))
+        else:
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SACOMP SET MtoPagos = ISNULL(MtoPagos, 0) + ? WHERE NumeroD = ? AND CodProv = ?", (monto_total_reducir, NumeroD, CodProv))
+            cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAACXP SET Saldo = Saldo - ? WHERE NumeroD = ? AND TipoCxP = '10' AND CodProv = ?", (monto_total_reducir, NumeroD, CodProv))
+        cursor.execute("UPDATE EnterpriseAdmin_AMC.dbo.SAPROV SET Saldo = Saldo - ? WHERE CodProv = ?", (monto_total_reducir, CodProv))
 
         # Enviar correo si corresponde (notificar o force_send)
         if notificar == 1 or force == 1:
@@ -1321,7 +1473,7 @@ async def editar_factura(numeroD: str, cod_prov: str = Query(default=''), payloa
             conn.close()
 
 @app.get("/api/procurement/cxp-status")
-async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...)):
+async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...), nro_unico: Optional[int] = Query(None)):
     try:
         conn = database.get_db_connection()
         cursor = conn.cursor()
@@ -1331,7 +1483,13 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
         # 2. Provider conditions from ProveedorCondiciones
         # 3. Sum of all Abonos from CxP_Abonos
         
-        query = """
+        where_clause = "cxp.CodProv = ? AND cxp.NumeroD = ? AND cxp.TipoCxP = '10'"
+        params = [cod_prov, numero_d]
+        if nro_unico:
+            where_clause = "cxp.NroUnico = ?"
+            params = [nro_unico]
+
+        query = f"""
             SELECT 
                 cxp.NumeroD, cxp.CodProv, cxp.Monto, cxp.Saldo, 
                 cxp.FechaE, cxp.FechaV AS FechaVSaint,
@@ -1346,6 +1504,7 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
                 ISNULL(cond.ProntoPago1_Pct, 0) AS ProntoPago1_Pct,
                 ISNULL(cond.ProntoPago2_Dias, 0) AS ProntoPago2_Dias,
                 ISNULL(cond.ProntoPago2_Pct, 0) AS ProntoPago2_Pct,
+                ISNULL(cond.DecimalesTasa, 4) AS DecimalesTasa,
                 prov.Descrip AS ProveedorNombre,
                 prov.NumeroUP, prov.FechaUP, prov.MontoUP,
                 dt_emision.dolarbcv AS TasaEmision,
@@ -1387,9 +1546,9 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
                 WHERE dolarbcv IS NOT NULL
                 ORDER BY id DESC
             ) dt_actual
-            WHERE cxp.CodProv = ? AND cxp.NumeroD = ? AND cxp.TipoCxP = '10'
+            WHERE {where_clause}
         """
-        cursor.execute(query, (cod_prov, numero_d))
+        cursor.execute(query, params)
         row = cursor.fetchone()
         
         if not row:
@@ -1458,10 +1617,17 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...))
 
         # Fetch Abonos History
         history_query = """
-            SELECT AbonoID, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado, AplicaIndexacion, Referencia, TipoAbono
-            FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos
-            WHERE CodProv = ? AND NumeroD = ?
-            ORDER BY FechaAbono ASC
+            SELECT
+                ab.AbonoID, ab.FechaAbono, ab.MontoBsAbonado, ab.TasaCambioDiaAbono,
+                ab.MontoUsdAbonado, ab.AplicaIndexacion, ab.Referencia, ab.TipoAbono,
+                ab.AfectaSaldo,
+                ISNULL(ma.Descripcion, ab.Referencia) AS DescripcionAjuste,
+                ma.Codigo AS CodigoMotivo
+            FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos ab
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.MotivosAjuste ma
+                ON ab.MotivoAjusteID = ma.MotivoID
+            WHERE ab.CodProv = ? AND ab.NumeroD = ?
+            ORDER BY ab.FechaAbono ASC, ab.AbonoID ASC
         """
         cursor.execute(history_query, (cod_prov, numero_d))
         history_cols = [column[0] for column in cursor.description]
@@ -1522,7 +1688,11 @@ async def get_debit_notes(search: Optional[str] = None, estatus: Optional[str] =
         params = []
         where_clauses = [
             "cxp.TipoCxP = '10'",
-            "ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1"
+            "ISNULL(abonos.TotalBsAbonado, 0) > cxp.Monto + 0.1",
+            # Excluir facturas donde se haya registrado un ajuste con AnulaNotaDebito=1
+            "NOT EXISTS (SELECT 1 FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos ab2"
+            " INNER JOIN EnterpriseAdmin_AMC.Procurement.MotivosAjuste ma ON ab2.MotivoAjusteID = ma.MotivoID"
+            " WHERE ab2.NumeroD = cxp.NumeroD AND ab2.CodProv = cxp.CodProv AND ma.AnulaNotaDebito = 1)"
         ]
 
         if search:
@@ -3270,6 +3440,12 @@ async def get_credit_notes(cod_prov: Optional[str] = None, estatus: Optional[str
             FROM EnterpriseAdmin_AMC.Procurement.CreditNotesTracking cn
             LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV prov ON cn.CodProv = prov.CodProv
             WHERE 1=1
+            -- Excluir facturas donde un ajuste ya anule la Nota de Crédito
+            AND NOT EXISTS (
+                SELECT 1 FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos ab2
+                INNER JOIN EnterpriseAdmin_AMC.Procurement.MotivosAjuste ma ON ab2.MotivoAjusteID = ma.MotivoID
+                WHERE ab2.NumeroD = cn.NumeroD AND ab2.CodProv = cn.CodProv AND ma.AnulaNotaCredito = 1
+            )
         """
         params = []
         if cod_prov:
@@ -3305,6 +3481,11 @@ async def get_pending_credit_notes(cod_prov: str):
             FROM EnterpriseAdmin_AMC.Procurement.CreditNotesTracking cn
             LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV prov ON cn.CodProv = prov.CodProv
             WHERE cn.CodProv = ? AND cn.Estatus = 'PENDIENTE'
+            AND NOT EXISTS (
+                SELECT 1 FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos ab2
+                INNER JOIN EnterpriseAdmin_AMC.Procurement.MotivosAjuste ma ON ab2.MotivoAjusteID = ma.MotivoID
+                WHERE ab2.NumeroD = cn.NumeroD AND ab2.CodProv = cn.CodProv AND ma.AnulaNotaCredito = 1
+            )
             ORDER BY cn.FechaSolicitud DESC
         """, (cod_prov,))
         columns = [col[0] for col in cursor.description]

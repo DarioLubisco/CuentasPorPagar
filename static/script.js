@@ -54,9 +54,11 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // ── Modo Pago Múltiple ──────────────────────────────────────────────
+    window.getItemKey = (item) => `${item.CodProv}_${item.NumeroD}`;
+    // Store multi-pay selections globally across pages/filters
     window.multiPayMode = false;
-    window.multiPaySelection = new Set();     // Set<NroUnico (int)>
-    window.multiPaySelectionData = new Map(); // Map<NroUnico, item>
+    window.multiPaySelection = new Set();     // Set<String rowKey>
+    window.multiPaySelectionData = new Map(); // Map<String rowKey, item>
 
     window.toggleMultiPayMode = () => {
         window.multiPayMode = !window.multiPayMode;
@@ -387,8 +389,21 @@ document.addEventListener('DOMContentLoaded', () => {
         let remainingUsd = mtoTotalUsd - totalUsdAbonado;
         if (remainingUsd < 0) remainingUsd = 0;
         
-        // Reflects 'temporal reality': only the unpaid portion in USD is multiplied by the current BCV rate
-        const saldoTargetBs = roundFixed(remainingUsd * currentTasa);
+        let saldoTargetBs = 0;
+        if (aplicaIndex) {
+            // Reflects 'temporal reality': only the unpaid portion in USD is multiplied by the current BCV rate
+            saldoTargetBs = roundFixed(remainingUsd * currentTasa);
+        } else {
+            // Take the Bolivar amount directly to avoid rounding drift from USD conversion back to BS
+            let abonoBs = 0;
+            if (cxp.TotalBsAbonado !== undefined) {
+                abonoBs = parseFloat(cxp.TotalBsAbonado) || 0;
+            } else {
+                abonoBs = parseFloat(cxp.MtoPagos) || 0;
+            }
+            saldoTargetBs = roundFixed(newMtoBs - abonoBs);
+            if (saldoTargetBs < 0) saldoTargetBs = 0;
+        }
         
         let finalBs = roundFixed(saldoTargetBs - retencionBs - retenIslrBs);
         if (finalBs < 0) finalBs = 0;
@@ -399,6 +414,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if(pct > 0) {
            descUsdMonto = roundFixed(mtoTotalUsd * (pct / 100.0));
         }
+
+        const origTotalUsd = (cxp.MontoMEx > 0) ? parseFloat(cxp.MontoMEx) : ((parseFloat(cxp.Monto) || 0) / historicalTasa);
 
         return {
             historicalTasa,
@@ -414,6 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
             equivUsd,
             descUsdMonto,
             mtoTotalUsd,
+            origTotalUsd,
             subtotalUsd: (parseFloat(cxp.TotalPrd) || 0) / historicalTasa,
             fletesUsd: (parseFloat(cxp.Fletes) || 0) / historicalTasa,
             d1Usd: (parseFloat(cxp.Descto1) || 0) / historicalTasa,
@@ -665,9 +683,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Allow selection: always for active invoices, also for paid if CONTADO_ERROR or PAGADO filter
             const currentFilter = document.getElementById('filterStatusBase')?.value || 'TODOS_ACTIVOS';
-            const canSelect = (saldo > 0.01) || currentFilter === 'CONTADO_ERROR' || currentFilter === 'PAGADO' || currentFilter === 'TODOS';
+            const canSelect = (saldoActualizadoBs > 0.01) || currentFilter === 'CONTADO_ERROR' || currentFilter === 'PAGADO' || currentFilter === 'TODOS';
+            const rKey = window.getItemKey(item);
+            const globalIndex = window.currentData.indexOf(item);
             const checkboxHtml = canSelect
-                ? `<input type="checkbox" class="row-checkbox" data-index="${index}" data-nrounico="${item.NroUnico}">`
+                ? `<input type="checkbox" class="row-checkbox" data-index="${globalIndex}" data-rowkey="${rKey}" data-nrounico="${item.NroUnico}">`
                 : `<input type="checkbox" disabled>`;
 
             // Highlight planned rows
@@ -685,7 +705,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td class="amount us-amount">${usdFormatter(montoUsd)}</td>
                     <td>${getStatusHtml(item)}</td>
                     <td>
-                        <button class="btn-icon" title="Gestionar Pagos" onclick="openAbonosPanel('${item.CodProv}', '${item.NumeroD}')">
+                        <button class="btn-icon" title="Gestionar Pagos" onclick="openAbonosPanel('${item.CodProv}', '${item.NumeroD}', ${item.NroUnico})">
                             <i data-lucide="calculator" size="16"></i>
                         </button>
                     </td>
@@ -702,22 +722,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Attach listeners to checkboxes
         document.querySelectorAll('.row-checkbox').forEach(cb => {
-            const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
+            const rKey = cb.getAttribute('data-rowkey');
+            const dataIndex = cb.getAttribute('data-index');
 
             // Restaurar estado desde el Set si está en modo múltiple
-            if (window.multiPayMode && window.multiPaySelection.has(nroUnico)) {
+            if (window.multiPayMode && window.multiPaySelection.has(rKey)) {
                 cb.checked = true;
             }
 
             cb.addEventListener('change', () => {
                 if (window.multiPayMode) {
                     if (cb.checked) {
-                        window.multiPaySelection.add(nroUnico);
-                        const item = window.currentData.find(d => d.NroUnico === nroUnico);
-                        if (item) window.multiPaySelectionData.set(nroUnico, item);
+                        window.multiPaySelection.add(rKey);
+                        const item = window.currentData[dataIndex];
+                        if (item) window.multiPaySelectionData.set(rKey, item);
                     } else {
-                        window.multiPaySelection.delete(nroUnico);
-                        window.multiPaySelectionData.delete(nroUnico);
+                        window.multiPaySelection.delete(rKey);
+                        window.multiPaySelectionData.delete(rKey);
                     }
                 }
                 recalculateSelection();
@@ -801,8 +822,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     submitPlanBtn.addEventListener('click', async () => {
-        const selectedNros = Array.from(document.querySelectorAll('.row-checkbox:checked'))
-            .map(cb => parseInt(cb.getAttribute('data-nrounico')));
+        const selectedRows = Array.from(document.querySelectorAll('.row-checkbox:checked'))
+            .map(cb => window.currentData[cb.getAttribute('data-index')]);
 
         const fecha = getDateValue(planFecha);
         const banco = planBanco.value;
@@ -2457,6 +2478,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td><span class="status-badge" style="background:var(--bg-secondary);">${p.TipoPersona || 'Auto'}</span></td>
                 <td>${p.ProntoPago1_Pct}% (${p.ProntoPago1_Dias}d)</td>
                 <td>${p.ProntoPago2_Pct}% (${p.ProntoPago2_Dias}d)</td>
+                <td>${p.IndexaIVA !== false ? '<span style="color:var(--success);">Sí</span>' : '<span style="color:var(--danger);">No</span>'}</td>
                 <td>
                     <button class="btn-icon" title="Editar Condiciones" onclick="openEditProvider('${p.CodProv}')">
                         <i data-lucide="edit-3" size="18"></i>
@@ -2477,7 +2499,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('editProvDiasNI').value = p.DiasNoIndexacion;
         document.getElementById('editProvDiasV').value = p.DiasVencimiento;
         if(document.getElementById('editProvIndexaIVA')) {
-            document.getElementById('editProvIndexaIVA').checked = p.IndexaIVA !== false;
+            document.getElementById('editProvIndexaIVA').checked = (p.IndexaIVA !== false && p.IndexaIVA !== 0 && p.IndexaIVA !== '0');
+        }
+        if(document.getElementById('editProvDecimales')) {
+            document.getElementById('editProvDecimales').value = p.DecimalesTasa || 4;
         }
         document.getElementById('editProvPP1Pct').value = p.ProntoPago1_Pct;
         document.getElementById('editProvPP1Dias').value = p.ProntoPago1_Dias;
@@ -2506,6 +2531,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ProntoPago2_Dias: parseInt(document.getElementById('editProvPP2Dias').value) || 0,
                 Email: document.getElementById('editProvEmail').value || null,
                 IndexaIVA: document.getElementById('editProvIndexaIVA')?.checked ?? true,
+                DecimalesTasa: parseInt(document.getElementById('editProvDecimales')?.value) || 4,
                 TipoPersona: document.getElementById('editProvTipoPersona')?.value || null
             };
 
@@ -2584,18 +2610,23 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentCxpStatus = null;
     let lastAutoFilledBs = '';
 
-    window.openAbonosPanel = async (codProv, numeroD) => {
+    window.openAbonosPanel = async (codProv, numeroD, nroUnico = null) => {
         abonosModal.classList.add('active');
         resetAbonoForm();
 
         abCodProv.value = codProv;
         abNumeroD.value = numeroD;
+        if (nroUnico) {
+            abonosModal.dataset.nrounico = nroUnico;
+        } else {
+            delete abonosModal.dataset.nrounico;
+        }
 
         // Use today's date by default for payment
         setupDateInput(abFechaPago);
         setDateValue(abFechaPago, new Date().toISOString().split('T')[0]);
 
-        await fetchCxpStatus(codProv, numeroD);
+        await fetchCxpStatus(codProv, numeroD, nroUnico);
         await updateExchangeRate(); // fetch rate for today's date
     };
 
@@ -2641,9 +2672,40 @@ document.addEventListener('DOMContentLoaded', () => {
         if (abTasaBadge) abTasaBadge.textContent = 'Tasa: —';
     };
 
-    const fetchCxpStatus = async (codProv, numeroD) => {
+
+    // ── Motivos de Ajuste: cargar y mostrar/ocultar ─────────────────────────
+    const loadMotivosAjuste = async () => {
         try {
-            const res = await fetch(`/api/procurement/cxp-status?cod_prov=${encodeURIComponent(codProv)}&numero_d=${encodeURIComponent(numeroD)}`);
+            const res = await fetch('/api/procurement/motivos-ajuste?solo_activos=true');
+            if (!res.ok) return;
+            const { data } = await res.json();
+            const opts = data.map(m => `<option value="${m.MotivoID}">[${m.Codigo}] ${m.Descripcion}</option>`).join('');
+            ['abMotivoAjuste', 'pmMotivoAjuste'].forEach(id => {
+                const sel = document.getElementById(id);
+                if (sel) sel.innerHTML = '<option value="">— Seleccione Motivo —</option>' + opts;
+            });
+        } catch(e) { console.warn('No se pudieron cargar motivos de ajuste', e); }
+    };
+
+    // Toggle motivo row visibility
+    document.addEventListener('change', (e) => {
+        if (e.target.id === 'abPermitirAjuste') {
+            const row = document.getElementById('abAjusteRow');
+            if (row) row.style.display = e.target.checked ? 'flex' : 'none';
+        }
+        if (e.target.id === 'pmPermitirAjuste') {
+            const row = document.getElementById('pmAjusteRow');
+            if (row) row.style.display = e.target.checked ? 'flex' : 'none';
+        }
+    });
+
+    loadMotivosAjuste(); // load once on init
+
+    const fetchCxpStatus = async (codProv, numeroD, nroUnico = null) => {
+        try {
+            let url = `/api/procurement/cxp-status?cod_prov=${encodeURIComponent(codProv)}&numero_d=${encodeURIComponent(numeroD)}`;
+            if (nroUnico) url += `&nro_unico=${encodeURIComponent(nroUnico)}`;
+            const res = await fetch(url);
             if (!res.ok) throw new Error("Factura no encontrada");
             const json = await res.json();
             currentCxpStatus = json.data;
@@ -2717,28 +2779,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Render History
         if (d.HistorialAbonos && d.HistorialAbonos.length > 0) {
-            const tipoBadge = (tipo) => {
+            const tipoBadge = (tipo, afectaSaldo) => {
+                if (tipo === 'DESCUENTO') return '<span class="status-badge" style="background:rgba(234,179,8,0.15);color:#fbbf24;">Descuento</span>';
+                if (tipo === 'AJUSTE')    return '<span class="status-badge" style="background:rgba(168,85,247,0.15);color:#d8b4fe;">Ajuste</span>';
                 const map = {
-                    'PAGO': '<span class="status-badge status-paid">Pago</span>',
-                    'RETENCION_IVA': '<span class="status-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa;">Ret. IVA</span>',
-                    'NOTA_CREDITO': '<span class="status-badge" style="background:rgba(59,130,246,0.15);color:#60a5fa;">N/C</span>'
+                    'PAGO_MANUAL':     '<span class="status-badge status-paid">Pago</span>',
+                    'PAGO':            '<span class="status-badge status-paid">Pago</span>',
+                    'RETENCION_IVA':   '<span class="status-badge" style="background:rgba(139,92,246,0.15);color:#a78bfa;">Ret. IVA</span>',
+                    'RETENCION_ISLR':  '<span class="status-badge" style="background:rgba(239,68,68,0.15);color:#f87171;">Ret. ISLR</span>',
+                    'NOTA_CREDITO':    '<span class="status-badge" style="background:rgba(59,130,246,0.15);color:#60a5fa;">N/C</span>',
+                    'NOTA_DEBITO':     '<span class="status-badge" style="background:rgba(239,68,68,0.15);color:#f87171;">N/D</span>',
                 };
                 return map[tipo] || `<span class="status-badge">${tipo || 'Pago'}</span>`;
             };
-            abonosHistoryBody.innerHTML = d.HistorialAbonos.map(a => `
-                <tr>
+            abonosHistoryBody.innerHTML = d.HistorialAbonos.map(a => {
+                const esDescuento = a.TipoAbono === 'DESCUENTO';
+                const rowStyle = esDescuento ? 'opacity:0.75; font-style:italic;' : '';
+                const displayRef = a.DescripcionAjuste || a.Referencia || '-';
+                const displayMonto = esDescuento
+                    ? `<span style="color:var(--warning, #fbbf24);">${formatBs(a.MontoBsAbonado)}</span>`
+                    : `${formatBs(a.MontoBsAbonado)}`;
+                const displayUsd  = esDescuento
+                    ? `<span style="color:var(--warning, #fbbf24);">${usdFormatter(a.MontoUsdAbonado)}</span>`
+                    : `${usdFormatter(a.MontoUsdAbonado)}`;
+                const canDelete = !['RETENCION_IVA', 'RETENCION_ISLR', 'NOTA_CREDITO', 'DESCUENTO'].includes(a.TipoAbono);
+                return `
+                <tr style="${rowStyle}">
                     <td>${formatDate(a.FechaAbono)}</td>
-                    <td>${tipoBadge(a.TipoAbono)}</td>
-                    <td class="amount">${formatBs(a.MontoBsAbonado)}</td>
+                    <td>${tipoBadge(a.TipoAbono, a.AfectaSaldo)}</td>
+                    <td class="amount">${displayMonto}</td>
                     <td>${bsFormatter(a.TasaCambioDiaAbono)}</td>
                     <td>${a.AplicaIndexacion ? '<span class="status-badge status-overdue">Sí</span>' : '<span class="status-badge status-paid">No</span>'}</td>
-                    <td class="amount us-amount">${usdFormatter(a.MontoUsdAbonado)}</td>
-                    <td>${a.Referencia || '-'}</td>
+                    <td class="amount us-amount">${displayUsd}</td>
+                    <td>${displayRef}</td>
                     <td style="text-align:center;">
-                        ${!['RETENCION_IVA', 'RETENCION_ISLR', 'NOTA_CREDITO'].includes(a.TipoAbono) ? `<button class="btn-icon" title="Anular Abono" onclick="anularAbonoCxp(${a.AbonoID}, '${d.CodProv}', '${d.NumeroD}')"><i data-lucide="trash-2" style="color:var(--danger);width:16px;"></i></button>` : `<span style="font-size:0.75rem;color:var(--text-secondary)" title="Anule desde el Módulo Respectivo">Auto.</span>`}
+                        ${canDelete ? `<button class="btn-icon" title="Anular Abono" onclick="anularAbonoCxp(${a.AbonoID}, '${d.CodProv}', '${d.NumeroD}')"><i data-lucide="trash-2" style="color:var(--danger);width:16px;"></i></button>` : `<span style="font-size:0.75rem;color:var(--text-secondary)" title="Registro automático">Auto.</span>`}
                     </td>
                 </tr>
-            `).join('');
+            `;}).join('');
         } else {
             abonosHistoryBody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-secondary);">No hay abonos registrados.</td></tr>`;
         }
@@ -2775,7 +2853,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 .then(r => r.ok ? r.json() : null)
                 .then(json => {
                     if (json && json.rate) {
-                        abTasaBadge.textContent = `${baseDateLabel}: ${json.rate.toFixed(2)}`;
+                        const decimals = d.DecimalesTasa !== undefined ? d.DecimalesTasa : 4;
+                        abTasaBadge.textContent = `${baseDateLabel}: ${json.rate.toFixed(decimals)}`;
                         abTasaBadge.style.color = 'var(--primary-accent)';
                         abTasaBadge.style.borderColor = 'rgba(99,102,241,0.4)';
                         abTasaBadge.title = `Tasa BCV del d\u00eda de ${d.BaseDiasCredito === 'EMISION' ? 'Emisi\u00f3n' : 'Entrega'} (${formatDate(baseDateStr)})`;
@@ -2825,9 +2904,13 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // --- Dynamic Invoice Status Modal ---
-    const dynamicInvoiceStatusModal = document.getElementById('dynamicInvoiceStatusModal');
-    window.closeDynamicInvoiceStatusModal = () => dynamicInvoiceStatusModal?.classList.remove('active');
-
+    window.closeDynamicInvoiceStatusModal = () => {
+        const m = document.getElementById('dynamicInvoiceStatusModal');
+        if (m) {
+            m.classList.remove('active');
+            m.style.cssText = "z-index: 10030;"; // Reset to its original inline style from HTML
+        }
+    };
     // --- Action Bar Event Listeners ---
     document.getElementById('abBtnRetIva')?.addEventListener('click', () => {
         const codProv = abCodProv.value;
@@ -2886,76 +2969,91 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('btnDynamicInvoiceStatus')?.addEventListener('click', () => {
-        if (!currentCxpStatus) {
-            console.warn("Calculadora clickeada pero currentCxpStatus es null. Asegúrese de que los datos de la factura hayan cargado.");
-            return;
-        }
-        const d = currentCxpStatus;
-        const tasaDia = parseFloat(abTasa.value) || 0;
-        if (!tasaDia) {
-            showToast('Por favor espere a que cargue la Tasa BCV.', 'warning');
-            return;
-        }
-
-        let pctDescuento = 0;
-        const abProntoPago = document.getElementById('abProntoPago');
-        const abTipoDescuento = document.getElementById('abTipoDescuento');
-        if (abProntoPago && abProntoPago.checked && abTipoDescuento) {
-            pctDescuento = parseFloat(abTipoDescuento.value) || 0;
-        }
-
-        const selIslrModal = document.getElementById('abConceptoISLR');
-        const islrRateModal = parseFloat(selIslrModal?.value) || 0;
-        const aplicaIndex = abAplicaIndex?.checked || false;
-
-        const fin = calculateInvoiceFinancials(d, {
-            tasaDia: tasaDia,
-            aplicaIndex: aplicaIndex,
-            aplicaIndexIva: abIndexaIva?.checked ?? true,
-            pctDesc: pctDescuento,
-            islrRate: islrRateModal
-        });
-
-        if (pctDescuento > 0) {
-            const dynDescuentoBox = document.getElementById('dynDescuentoBox');
-            if (dynDescuentoBox) {
-                dynDescuentoBox.style.display = 'flex';
-                document.getElementById('dynPctDesc').textContent = pctDescuento;
-                document.getElementById('dynMontoDescUsd').textContent = '-' + usdFormatter(fin.descUsdMonto);
+        try {
+            console.log('Botón Resumen Cálculo presionado');
+            if (!currentCxpStatus) {
+                showToast('Calculadora no disponible. Faltan datos financieros de la factura.', 'error');
+                console.warn("Calculadora clickeada pero currentCxpStatus es null. Asegúrese de que los datos de la factura hayan cargado.");
+                return;
             }
-        } else {
-            const dynDescuentoBox = document.getElementById('dynDescuentoBox');
-            if (dynDescuentoBox) dynDescuentoBox.style.display = 'none';
+            const d = currentCxpStatus;
+            const tasaDia = parseFloat(abTasa.value) || 0;
+            if (!tasaDia) {
+                showToast('Por favor espere a que cargue la Tasa BCV.', 'warning');
+                return;
+            }
+
+            let pctDescuento = 0;
+            const abProntoPago = document.getElementById('abProntoPago');
+            const abTipoDescuento = document.getElementById('abTipoDescuento');
+            if (abProntoPago && abProntoPago.checked && abTipoDescuento) {
+                pctDescuento = parseFloat(abTipoDescuento.value) || 0;
+            }
+
+            const selIslrModal = document.getElementById('abConceptoISLR');
+            const islrRateModal = parseFloat(selIslrModal?.value) || 0;
+            const aplicaIndex = abAplicaIndex?.checked || false;
+
+            const fin = calculateInvoiceFinancials(d, {
+                tasaDia: tasaDia,
+                aplicaIndex: aplicaIndex,
+                aplicaIndexIva: abIndexaIva?.checked ?? true,
+                pctDesc: pctDescuento,
+                islrRate: islrRateModal
+            });
+
+            if (pctDescuento > 0) {
+                const dynDescuentoBox = document.getElementById('dynDescuentoBox');
+                if (dynDescuentoBox) {
+                    dynDescuentoBox.style.display = 'flex';
+                    document.getElementById('dynPctDesc').textContent = pctDescuento;
+                    document.getElementById('dynMontoDescUsd').textContent = '-' + usdFormatter(fin.descUsdMonto);
+                }
+            } else {
+                const dynDescuentoBox = document.getElementById('dynDescuentoBox');
+                if (dynDescuentoBox) dynDescuentoBox.style.display = 'none';
+            }
+            
+            // UI Updates
+            const exactUsdFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+            document.getElementById('dynTasaBcv').textContent = 'Bs ' + new Intl.NumberFormat('de-DE', { minimumFractionDigits: 4, maximumFractionDigits: 4 }).format(fin.currentTasa);
+            document.getElementById('dynSubtotalUsd').textContent = '$' + exactUsdFormatter.format(fin.subtotalUsd);
+            document.getElementById('dynMtoTotalUsd').textContent = '$' + exactUsdFormatter.format(fin.origTotalUsd);
+            
+            // Conditionally show Fletes/Desctos
+            let desctoFletesHtml = '';
+            if (fin.fletesUsd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(+) Fletes:</span> <span>${usdFormatter(fin.fletesUsd)}</span></div>`;
+            if (fin.d1Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 1:</span> <span style="color:var(--danger);">${usdFormatter(fin.d1Usd)}</span></div>`;
+            if (fin.d2Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 2:</span> <span style="color:var(--danger);">${usdFormatter(fin.d2Usd)}</span></div>`;
+            document.getElementById('dynDesctoFletesBox').innerHTML = desctoFletesHtml;
+
+            document.getElementById('dynBaseBs').textContent = formatBs(fin.baseBs);
+            document.getElementById('dynIvaUsd').textContent = usdFormatter(aplicaIndex ? fin.ivaUsd : roundFixed(fin.ivaBs / fin.currentTasa));
+            
+            // New IVA breakdown layout
+            document.getElementById('dynIvaBs').textContent = formatBs(fin.ivaBs);
+            if(document.getElementById('dynIvaAPagar')) document.getElementById('dynIvaAPagar').textContent = formatBs(fin.ivaAPagarBs);
+            if(document.getElementById('dynIvaRetenido')) document.getElementById('dynIvaRetenido').textContent = formatBs(fin.retencionBs);
+            if(document.getElementById('dynRetenIslrBs')) document.getElementById('dynRetenIslrBs').textContent = '- ' + formatBs(fin.retenIslrBs);
+
+            document.getElementById('dynExentoBs').textContent = formatBs(fin.exentoBs);
+            
+            // Final total payable
+            document.getElementById('dynRestanteBs').textContent = formatBs(fin.finalBs);
+
+            const modalRecalculo = document.getElementById('dynamicInvoiceStatusModal');
+            if (modalRecalculo) {
+                document.body.appendChild(modalRecalculo);
+                modalRecalculo.classList.add('active');
+                modalRecalculo.style.cssText = "display: flex !important; z-index: 999999 !important; opacity: 1 !important; visibility: visible !important; pointer-events: auto !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important;";
+            } else {
+                showToast("Error: No modal", "error");
+            }
+            lucide.createIcons();
+        } catch (err) {
+            console.error(err);
+            showToast('Error: ' + err.message, 'error');
         }
-        
-        // UI Updates
-        document.getElementById('dynTasaBcv').textContent = formatBs(fin.currentTasa);
-        document.getElementById('dynSubtotalUsd').textContent = usdFormatter(fin.subtotalUsd);
-        document.getElementById('dynMtoTotalUsd').textContent = usdFormatter(fin.mtoTotalUsd);
-        
-        // Conditionally show Fletes/Desctos
-        let desctoFletesHtml = '';
-        if (fin.fletesUsd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(+) Fletes:</span> <span>${usdFormatter(fin.fletesUsd)}</span></div>`;
-        if (fin.d1Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 1:</span> <span style="color:var(--danger);">${usdFormatter(fin.d1Usd)}</span></div>`;
-        if (fin.d2Usd > 0) desctoFletesHtml += `<div style="display:flex;justify-content:space-between; margin-bottom: 2px;"><span>(-) Descto 2:</span> <span style="color:var(--danger);">${usdFormatter(fin.d2Usd)}</span></div>`;
-        document.getElementById('dynDesctoFletesBox').innerHTML = desctoFletesHtml;
-
-        document.getElementById('dynBaseBs').textContent = formatBs(fin.baseBs);
-        document.getElementById('dynIvaUsd').textContent = usdFormatter(aplicaIndex ? fin.ivaUsd : roundFixed(fin.ivaBs / fin.currentTasa));
-        
-        // New IVA breakdown layout
-        document.getElementById('dynIvaBs').textContent = formatBs(fin.ivaBs);
-        if(document.getElementById('dynIvaAPagar')) document.getElementById('dynIvaAPagar').textContent = formatBs(fin.ivaAPagarBs);
-        if(document.getElementById('dynIvaRetenido')) document.getElementById('dynIvaRetenido').textContent = formatBs(fin.retencionBs);
-        if(document.getElementById('dynRetenIslrBs')) document.getElementById('dynRetenIslrBs').textContent = '- ' + formatBs(fin.retenIslrBs);
-
-        document.getElementById('dynExentoBs').textContent = formatBs(fin.exentoBs);
-        
-        // Final total payable
-        document.getElementById('dynRestanteBs').textContent = formatBs(fin.finalBs);
-
-        dynamicInvoiceStatusModal?.classList.add('active');
-        lucide.createIcons();
     });
 
     const checkIndexationStatus = () => {
@@ -2970,7 +3068,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // If payment date is STRICTLY greater than NI date, Indexation applies by default
         abAplicaIndex.checked = pagoDate > niDate;
         if(abIndexaIva) {
-            abIndexaIva.checked = d.IndexaIVA !== false;
+            abIndexaIva.checked = currentCxpStatus.IndexaIVA !== false;
         }
         
         fillDefaultPaymentAmount(false); 
@@ -3096,9 +3194,19 @@ document.addEventListener('DOMContentLoaded', () => {
         calculateUsdAmount();
     });
     
-    abIndexaIva?.addEventListener('change', () => {
-        fillDefaultPaymentAmount(true);
-        calculateUsdAmount();
+    abIndexaIva?.addEventListener('change', (e) => {
+        if (e.target.checked && !abAplicaIndex.checked) {
+            e.target.checked = false;
+        } else {
+            fillDefaultPaymentAmount(true);
+            calculateUsdAmount();
+        }
+    });
+    
+    abAplicaIndex?.addEventListener('change', (e) => {
+        if (!e.target.checked && abIndexaIva) {
+            abIndexaIva.checked = false;
+        }
     });
     
     const abProntoPago = document.getElementById('abProntoPago');
@@ -3125,6 +3233,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!currentCxpStatus) return;
 
         const formData = new FormData();
+        const abNroUnicoValue = abonosModal.dataset.nrounico;
+        if (abNroUnicoValue) formData.append('NroUnico', abNroUnicoValue);
         formData.append('NumeroD', abNumeroD.value);
         formData.append('CodProv', abCodProv.value);
         formData.append('FechaAbono', getDateValue(abFechaPago));
@@ -3136,6 +3246,68 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const notificar = document.getElementById('abNotificarCorreo')?.checked || false;
         formData.append('NotificarCorreo', notificar);
+
+        // --- Lógica: registrar descuento Pronto Pago como memo contable (AfectaSaldo=0)
+        const pctDescuentoFinal = (document.getElementById('abProntoPago')?.checked && document.getElementById('abTipoDescuento'))
+            ? (parseFloat(document.getElementById('abTipoDescuento').value) || 0)
+            : 0;
+        if (pctDescuentoFinal > 0) {
+            const finSinDesc = calculateInvoiceFinancials(currentCxpStatus, {
+                tasaDia: abAplicaIndex.checked ? (parseFloat(abTasa.value) || 0) : (currentCxpStatus.TasaEmision || 0),
+                aplicaIndex: abAplicaIndex.checked,
+                aplicaIndexIva: document.getElementById('abIndexaIva')?.checked ?? true,
+                pctDesc: 0, // Sin descuento para obtener base
+                islrRate: parseFloat(document.getElementById('abConceptoISLR')?.value) || 0
+            });
+            const finConDesc = calculateInvoiceFinancials(currentCxpStatus, {
+                tasaDia: abAplicaIndex.checked ? (parseFloat(abTasa.value) || 0) : (currentCxpStatus.TasaEmision || 0),
+                aplicaIndex: abAplicaIndex.checked,
+                aplicaIndexIva: document.getElementById('abIndexaIva')?.checked ?? true,
+                pctDesc: pctDescuentoFinal,
+                islrRate: parseFloat(document.getElementById('abConceptoISLR')?.value) || 0
+            });
+            const montoDesc = +(finSinDesc.finalBs - finConDesc.finalBs).toFixed(2);
+            if (montoDesc > 0) {
+                formData.append('MontoDescuentoBs', montoDesc.toFixed(2));
+                // Auto-buscar motivo de Descuento Pronto Pago (Codigo = 100)
+                const selMotivo = document.getElementById('abMotivoAjuste');
+                const ppOpt = Array.from(selMotivo?.options || []).find(o => o.text.includes('100') || o.text.toLowerCase().includes('pronto pago'));
+                if (ppOpt) formData.append('MotivoDescuentoID', ppOpt.value);
+            }
+        }
+
+        // --- Lógica de Ajuste por Remanente ---
+        const checkAjuste = document.getElementById('abPermitirAjuste');
+        if (checkAjuste && checkAjuste.checked) {
+            let pctDescuento = 0;
+            if (document.getElementById('abProntoPago')?.checked && document.getElementById('abTipoDescuento')) {
+                pctDescuento = parseFloat(document.getElementById('abTipoDescuento').value) || 0;
+            }
+            const fin = calculateInvoiceFinancials(currentCxpStatus, {
+                tasaDia: abAplicaIndex.checked ? (parseFloat(abTasa.value) || 0) : (currentCxpStatus.TasaEmision || 0),
+                aplicaIndex: abAplicaIndex.checked,
+                aplicaIndexIva: document.getElementById('abIndexaIva')?.checked ?? true,
+                pctDesc: pctDescuento,
+                islrRate: parseFloat(document.getElementById('abConceptoISLR')?.value) || 0
+            });
+            const pagoReal = parseFloat(abMontoBs.value) || 0;
+             const deudaReal = currentCxpStatus.Saldo || 0;
+            const diferencia = (deudaReal - pagoReal);
+            if (diferencia > 0) {
+                const motiID = document.getElementById('abMotivoAjuste')?.value;
+                if (!motiID) {
+                    showToast('⚠️ Seleccione el Motivo del Ajuste Contable antes de proceder.', 'warning');
+                    return;
+                }
+                const umbral = deudaReal * 0.10;
+                if (diferencia > umbral) {
+                    const r = confirm(`El ajuste contable a generar supera el 10% de la deuda original. ¿Desea proceder con este Write-off de exceso?`);
+                    if (!r) return;
+                }
+                formData.append('MontoAjusteBs', diferencia.toFixed(2));
+                formData.append('MotivoAjusteID', motiID);
+            }
+        }
 
         const fileInput = document.getElementById('abComprobante');
         if (fileInput && fileInput.files.length > 0) {
@@ -3267,12 +3439,31 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => { toast.remove(); }, 4500);
     };
 
+    // --- Helper for forcefully rendering modals ---
+    window.forceShowModal = (modalElement) => {
+        if (!modalElement) return;
+        document.body.appendChild(modalElement);
+        modalElement.classList.add('active');
+        modalElement.dataset.originalCssText = modalElement.style.cssText;
+        modalElement.style.cssText = "display: flex !important; z-index: 999999 !important; opacity: 1 !important; visibility: visible !important; pointer-events: auto !important; position: fixed !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important;";
+    };
+
+    window.forceHideModal = (modalElement) => {
+        if (!modalElement) return;
+        modalElement.classList.remove('active');
+        if (typeof modalElement.dataset.originalCssText !== 'undefined') {
+            modalElement.style.cssText = modalElement.dataset.originalCssText;
+        } else {
+            modalElement.style.cssText = "z-index: 10020;";
+        }
+    };
+
     // --- Invoice Edit Modal ---
     const invoiceEditModal = document.getElementById('invoiceEditModal');
     const invoiceEditForm = document.getElementById('invoiceEditForm');
 
     window.closeInvoiceEditModal = () => {
-        invoiceEditModal?.classList.remove('active');
+        forceHideModal(invoiceEditModal);
     };
 
     document.getElementById('editInvoiceBtn')?.addEventListener('click', () => {
@@ -3323,7 +3514,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Save cod_prov in the form for the PATCH request
         invoiceEditForm.dataset.codProv = item.CodProv || '';
 
-        invoiceEditModal?.classList.add('active');
+        forceShowModal(invoiceEditModal);
         lucide.createIcons();
     });
 
@@ -3448,15 +3639,24 @@ document.addEventListener('DOMContentLoaded', () => {
         let pmCxpStatuses = {};       // keyed by NumeroD
         let lastProcessedPagos = [];  // saved after successful processing for re-send
 
-        // Global Action for Master Checkbox
         document.getElementById('pmIndexadoMaster')?.addEventListener('change', (e) => {
             const isChecked = e.target.checked;
-            const tbody = document.getElementById('pmTableBody');
+            const tbody = document.getElementById('pmInvoicesTable');
+            
+            if (!isChecked) {
+                const ivaMaster = document.getElementById('pmIndexaIVAMaster');
+                if (ivaMaster) ivaMaster.checked = false;
+            }
+
             if (tbody) {
                 tbody.querySelectorAll('tr').forEach(row => {
                     const cb = row.querySelector('.pm-indexado');
                     if (cb && !cb.disabled && cb.checked !== isChecked) {
                         cb.checked = isChecked;
+                        if (!isChecked) {
+                            const ivaCb = row.querySelector('.pm-indexado-iva');
+                            if (ivaCb) ivaCb.checked = false;
+                        }
                         pmCalcRow(row);
                     }
                 });
@@ -3466,7 +3666,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('pmIndexaIVAMaster')?.addEventListener('change', (e) => {
             const isChecked = e.target.checked;
-            const tbody = document.getElementById('pmTableBody');
+            
+            const masterBase = document.getElementById('pmIndexadoMaster');
+            if (isChecked && masterBase && !masterBase.checked) {
+                e.target.checked = false;
+                return;
+            }
+
+            const tbody = document.getElementById('pmInvoicesTable');
             if (tbody) {
                 tbody.querySelectorAll('tr').forEach(row => {
                     const cb = row.querySelector('.pm-indexado-iva');
@@ -3482,13 +3689,35 @@ document.addEventListener('DOMContentLoaded', () => {
         const roundFixed = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 
         window.closePagoMultipleModal = () => pmModal?.classList.remove('active');
+
+        document.getElementById('pmGoBtnRetIva')?.addEventListener('click', () => {
+            closePagoMultipleModal();
+            document.getElementById('btnGenerarRetencion')?.click();
+        });
+        document.getElementById('pmGoBtnRetIslr')?.addEventListener('click', () => {
+            closePagoMultipleModal();
+            document.getElementById('btnGenerarRetencionIslr')?.click();
+        });
+        document.getElementById('pmGoBtnND')?.addEventListener('click', () => {
+            showToast('⚠️ Las Notas de Débito deben generarse desde el panel individual de cada factura.', 'warning');
+        });
+        document.getElementById('pmGoBtnNC')?.addEventListener('click', () => {
+             // If they selected exactly 1, we can redirect. Otherwise warn.
+             if (window.multiPaySelectionData && window.multiPaySelectionData.size === 1) {
+                 closePagoMultipleModal();
+                 const singleItem = Array.from(window.multiPaySelectionData.values())[0];
+                 openNCFromMain(singleItem.CodProv, singleItem.NumeroD);
+             } else {
+                 showToast('⚠️ Seleccione una sola factura para generar Nota de Crédito Manual.', 'warning');
+             }
+        });
         window.closeGlobalDynamicRecalculateModal = () =>
             document.getElementById('globalDynamicRecalculateModal')?.classList.remove('active');
 
         // ── Helpers per-row ─────────────────────────────────────────────
         const pmCalcRow = (row) => {
-            const nD  = row.dataset.numerod;
-            const cxp = pmCxpStatuses[nD];
+            const rKey = row.dataset.rowkey;
+            const cxp = pmCxpStatuses[rKey];
             if (!cxp) return;
 
             const historicalTasa = parseFloat(cxp.TasaEmision) || 1;
@@ -3537,7 +3766,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const indexado = row.querySelector('.pm-indexado')?.checked;
-            const nD = row.dataset.numerod;
+            const nD = row.dataset.nrounico;
             const cxp = pmCxpStatuses[nD];
             
             if (!indexado && cxp && cxp.TasaEmision) {
@@ -3571,6 +3800,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if(document.getElementById('pmTotalRetIva'))    document.getElementById('pmTotalRetIva').textContent    = formatBs(totalRetIva);
             if(document.getElementById('pmTotalRetIslr'))   document.getElementById('pmTotalRetIslr').textContent   = formatBs(totalRetIslr);
 
+            const montoInput = document.getElementById('pmMontoTotalReal');
+            if (montoInput && montoInput.dataset.manualEdit !== "true") {
+                montoInput.value = totalBs.toFixed(2);
+            }
 
             const montoReal = parseFloat(document.getElementById('pmMontoTotalReal')?.value) || 0;
             const diff = montoReal - totalBs;
@@ -3583,7 +3816,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        document.getElementById('pmMontoTotalReal')?.addEventListener('input', pmRecalcTotals);
+        document.getElementById('pmMontoTotalReal')?.addEventListener('input', (e) => {
+            e.target.dataset.manualEdit = "true";
+            pmRecalcTotals();
+        });
 
         // ── Fetch exchange rate ─────────────────────────────────────────
         const pmFetchRate = async (row) => {
@@ -3593,11 +3829,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res  = await fetch(`/api/exchange-rate?fecha=${encodeURIComponent(fecha)}`);
                 if (!res.ok) return;
                 const json = await res.json();
-                if (json.rate) {
-                    row.querySelector('.pm-tasa').value = json.rate.toFixed(4);
-                }
-                const nD  = row.dataset.numerod;
+                const nD = row.dataset.nrounico;
                 const cxp = pmCxpStatuses[nD];
+                if (json.rate) {
+                    const dec = cxp?.DecimalesTasa !== undefined ? cxp.DecimalesTasa : 4;
+                    row.querySelector('.pm-tasa').value = json.rate.toFixed(dec);
+                }
                 if (cxp) {
                     const pagoDate = new Date(fecha);
                     const niDate   = new Date(cxp.FechaNI_Calculada);
@@ -3614,8 +3851,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ── Open row-level Recálculo Dinámico ───────────────────────────
         const pmOpenRowDynamic = (row) => {
-            const nD  = row.dataset.numerod;
-            const cxp = pmCxpStatuses[nD];
+            const rKey = row.dataset.rowkey;
+            const cxp = pmCxpStatuses[rKey];
             if (!cxp) return;
 
             const indexado   = row.querySelector('.pm-indexado')?.checked;
@@ -3645,8 +3882,9 @@ document.addEventListener('DOMContentLoaded', () => {
             dynModal.querySelector('#dynExentoBs'    )&&(dynModal.querySelector('#dynExentoBs'    ).textContent = formatBs(fin.exentoBs));
             dynModal.querySelector('#dynRestanteBs'  )&&(dynModal.querySelector('#dynRestanteBs'  ).textContent = formatBs(fin.finalBs));
 
-            dynModal.querySelector('#dynMtoTotalUsd' )&&(dynModal.querySelector('#dynMtoTotalUsd' ).textContent = usdFormatter(fin.mtoTotalUsd));
-            dynModal.querySelector('#dynSubtotalUsd' )&&(dynModal.querySelector('#dynSubtotalUsd' ).textContent = usdFormatter(fin.subtotalUsd));
+            const exactUsdFormatter = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+            dynModal.querySelector('#dynMtoTotalUsd' )&&(dynModal.querySelector('#dynMtoTotalUsd' ).textContent = '$' + exactUsdFormatter.format(fin.origTotalUsd));
+            dynModal.querySelector('#dynSubtotalUsd' )&&(dynModal.querySelector('#dynSubtotalUsd' ).textContent = '$' + exactUsdFormatter.format(fin.subtotalUsd));
 
             if (pctDesc > 0) {
                 const dbox = dynModal.querySelector('#dynDescuentoBox');
@@ -3726,6 +3964,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // ── Build rows when modal opens ─────────────────────────────────
         document.getElementById('btnPagoMultiple')?.addEventListener('click', async () => {
+            const pmMontoTotalReal = document.getElementById('pmMontoTotalReal');
+            if (pmMontoTotalReal) {
+                pmMontoTotalReal.value = "";
+                pmMontoTotalReal.dataset.manualEdit = "false";
+            }
             let items = [];
 
             if (window.multiPayMode && window.multiPaySelection.size >= 2) {
@@ -3736,8 +3979,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const checked = document.querySelectorAll('.row-checkbox:checked');
                 if (checked.length < 2) return;
                 checked.forEach(cb => {
-                    const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
-                    const item = window.currentData.find(d => d.NroUnico === nroUnico);
+                    const dataIndex = cb.getAttribute('data-index');
+                    const item = window.currentData[dataIndex];
                     if (item) items.push(item);
                 });
             }
@@ -3756,13 +3999,15 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('btnPmResendEmail') && (document.getElementById('btnPmResendEmail').disabled = true);
 
             const provName = items[0].ProveedorNombre || items[0].CodProv;
-            document.getElementById('pagoMultiSubtitle').textContent =
-                `Proveedor: ${provName} | ${items.length} facturas seleccionadas`;
+            document.getElementById('pmProvNameLabel').textContent = provName;
+            document.getElementById('pmSelectedCountLabel').textContent = items.length;
 
             const today = new Date().toISOString().split('T')[0];
             const tbody = document.getElementById('pmInvoicesTable');
-            tbody.innerHTML = items.map(item => `
-                <tr data-numerod="${item.NumeroD}" data-codprov="${item.CodProv}">
+            tbody.innerHTML = items.map(item => {
+                const rKey = window.getItemKey(item);
+                return `
+                <tr data-rowkey="${rKey}" data-nrounico="${item.NroUnico}" data-numerod="${item.NumeroD}" data-codprov="${item.CodProv}">
                     <td style="font-weight:500;">${item.NumeroD}</td>
                     <td class="amount pm-saldo" style="color:var(--success);">...</td>
                     <td><input type="date" class="form-control pm-fecha" value="${today}"
@@ -3804,7 +4049,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td style="display:none;" class="pm-retiva-bs">0</td>
                     <td style="display:none;" class="pm-retislr-bs">0</td>
                 </tr>
-            `).join('');
+            `}).join('');
 
             // Attach row-level listeners
             tbody.querySelectorAll('tr').forEach(row => {
@@ -3817,11 +4062,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     pmCalcRow(row);
                     pmRecalcTotals();
                 });
-                row.querySelector('.pm-indexado')?.addEventListener('change', () => pmCalcRow(row));
-                row.querySelector('.pm-indexado-iva')?.addEventListener('change', () => pmCalcRow(row));
+                row.querySelector('.pm-indexado')?.addEventListener('change', (e) => {
+                    if (!e.target.checked) {
+                        const ivaCb = row.querySelector('.pm-indexado-iva');
+                        if (ivaCb) ivaCb.checked = false;
+                    }
+                    pmCalcRow(row)
+                });
+                row.querySelector('.pm-indexado-iva')?.addEventListener('change', (e) => {
+                    const baseCb = row.querySelector('.pm-indexado');
+                    if (baseCb && !baseCb.checked && e.target.checked) {
+                        e.target.checked = false;
+                    }
+                    pmCalcRow(row)
+                });
                 row.querySelector('.pm-pronto-pago')?.addEventListener('change', () => {
-                    const nD  = row.dataset.numerod;
-                    const cxp = pmCxpStatuses[nD];
+                    const rKey = row.dataset.rowkey;
+                    const cxp = pmCxpStatuses[rKey];
                     const sel = row.querySelector('.pm-desc');
                     if (sel) {
                         sel.disabled = !row.querySelector('.pm-pronto-pago').checked;
@@ -3844,18 +4101,24 @@ document.addEventListener('DOMContentLoaded', () => {
             // Fetch CXP status and rate for each row
             for (const item of items) {
                 try {
-                    const res = await fetch(`/api/procurement/cxp-status?cod_prov=${encodeURIComponent(item.CodProv)}&numero_d=${encodeURIComponent(item.NumeroD)}`);
+                    let url = `/api/procurement/cxp-status?cod_prov=${encodeURIComponent(item.CodProv)}&numero_d=${encodeURIComponent(item.NumeroD)}` + (item.NroUnico ? `&nro_unico=${item.NroUnico}`:'');
+                    const res = await fetch(url);
                     if (!res.ok) continue;
                     const json = await res.json();
-                    pmCxpStatuses[item.NumeroD] = json.data;
+                    
+                    const rKey = window.getItemKey(item);
+                    pmCxpStatuses[rKey] = json.data;
 
-                    const row = tbody.querySelector(`tr[data-numerod="${item.NumeroD}"]`);
+                    const row = tbody.querySelector(`tr[data-rowkey="${rKey}"]`);
                     if (!row) continue;
 
                     row.querySelector('.pm-saldo').textContent = (json.data.SaldoRestanteUSD || 0).toFixed(2);
                     const tasaEmis = parseFloat(json.data.TasaEmision) || 0;
                     const tasaEmisEl = row.querySelector('.pm-tasa-emis');
-                    if (tasaEmisEl) tasaEmisEl.textContent = tasaEmis > 0 ? bsFormatter(tasaEmis) : '—';
+                    if (tasaEmisEl) {
+                        const recDec = json.data.DecimalesTasa !== undefined ? json.data.DecimalesTasa : 4;
+                        tasaEmisEl.textContent = tasaEmis > 0 ? tasaEmis.toFixed(recDec) : '—';
+                    }
 
                     const sel = row.querySelector('.pm-desc');
                     if (sel && json.data) {
@@ -3908,8 +4171,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const fileInput  = document.getElementById('pmComprobante');
 
             const pagos = [];
+            let showAlert10Pct = false;
             document.querySelectorAll('#pmInvoicesTable tr').forEach(row => {
-                const nD      = row.dataset.numerod;
+                const nD      = row.dataset.nrounico;
                 const codProv = row.dataset.codprov;
                 const cxp     = pmCxpStatuses[nD];
                 const indexado = row.querySelector('.pm-indexado')?.checked;
@@ -3917,14 +4181,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 const montoBs  = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
                 const montoUsd = parseFloat(row.querySelector('.pm-monto-usd')?.textContent.replace(/[^0-9.-]+/g,"")) || 0;
 
-                // Ignore rows where the user has determined no payment should occur
-                if (montoBs <= 0) return;
+                const checkAjuste = document.getElementById('pmPermitirAjuste');
+                const isAjusteActivo = checkAjuste && checkAjuste.checked;
+
+                // Ignore rows with NO payment AND NO adjustment requested
+                if (montoBs <= 0 && !isAjusteActivo) return;
+
+                const rawNumeroD = row.dataset.numerod;
+                
+                // Calculate missing amount for this row
+                let montoAjusteBs = 0;
+                
+                if (isAjusteActivo) {
+                    if (cxp) {
+                        const deudaReal = cxp.Saldo || 0;
+                        const dif = +(deudaReal - montoBs).toFixed(2);
+                        if (dif > 0) {
+                            montoAjusteBs = dif;
+                            if (dif > (deudaReal * 0.10)) {
+                                showAlert10Pct = true;
+                            }
+                        }
+                    }
+                }
 
                 pagos.push({
-                    NumeroD: nD,
+                    NroUnico: nD,
+                    NumeroD: rawNumeroD,
                     CodProv: codProv,
                     FechaAbono: row.querySelector('.pm-fecha')?.value,
                     MontoBsAbonado: montoBs,
+                    MontoAjusteBs: montoAjusteBs,
+                    MotivoAjusteID: document.getElementById('pmMotivoAjuste')?.value || null,
                     TasaCambioDiaAbono: indexado ? tasa : (cxp?.TasaEmision || 0),
                     MontoUsdAbonado: montoUsd,
                     AplicaIndexacion: indexado || false,
@@ -4129,7 +4417,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const retConfigForm = document.getElementById('retConfigForm');
 
         document.getElementById('configRetencionesBtn')?.addEventListener('click', async () => {
-            retConfigModal.classList.add('active');
+            forceShowModal(retConfigModal);
             try {
                 const res = await fetch('/api/retenciones/config');
                 const { data } = await res.json();
@@ -4149,7 +4437,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        window.closeRetConfigModal = () => retConfigModal.classList.remove('active');
+        window.closeRetConfigModal = () => forceHideModal(retConfigModal);
 
         retConfigForm?.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -4313,14 +4601,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 inp.addEventListener('input', recalcAllRetenciones);
             });
 
-            generarRetencionModal.classList.add('active');
+            forceShowModal(generarRetencionModal);
             lucide.createIcons();
             recalcAllRetenciones();
         });
 
         document.getElementById('genRetPctGaceta')?.addEventListener('change', recalcAllRetenciones);
 
-        window.closeGenerarRetencionModal = () => generarRetencionModal.classList.remove('active');
+        window.closeGenerarRetencionModal = () => forceHideModal(generarRetencionModal);
 
         generarRetencionForm?.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -4488,13 +4776,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }).join('');
 
             tbody.querySelectorAll('.ret-base').forEach(inp => inp.addEventListener('input', recalcIslr));
-            generarRetencionIslrModal.classList.add('active');
+            forceShowModal(generarRetencionIslrModal);
             lucide.createIcons();
             recalcIslr();
         });
 
         document.getElementById('genRetIslrConcepto')?.addEventListener('change', recalcIslr);
-        window.closeGenerarRetencionIslrModal = () => generarRetencionIslrModal.classList.remove('active');
+        window.closeGenerarRetencionIslrModal = () => forceHideModal(generarRetencionIslrModal);
 
         generarRetencionIslrForm?.addEventListener('submit', async (e) => {
             e.preventDefault();
