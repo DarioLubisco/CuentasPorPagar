@@ -390,23 +390,31 @@ document.addEventListener('DOMContentLoaded', () => {
         if (remainingUsd < 0) remainingUsd = 0;
         
         let saldoTargetBs = 0;
-        if (aplicaIndex) {
+        
+        // ULTIMATE FALLBACK: if cxp.Saldo is explicitly 0, the ERP considers the invoice dead.
+        let deudaDb = parseFloat(cxp.Saldo) || 0;
+        let isFullyPaid = (deudaDb <= 0 && (parseFloat(cxp.Monto) || 0) > 0);
+
+        if (isFullyPaid) {
+            remainingUsd = 0;
+            saldoTargetBs = 0;
+        } else if (aplicaIndex) {
             // Reflects 'temporal reality': only the unpaid portion in USD is multiplied by the current BCV rate
             saldoTargetBs = roundFixed(remainingUsd * currentTasa);
         } else {
             // Take the Bolivar amount directly to avoid rounding drift from USD conversion back to BS
             let abonoBs = 0;
-            if (cxp.TotalBsAbonado !== undefined) {
-                abonoBs = parseFloat(cxp.TotalBsAbonado) || 0;
-            } else {
-                abonoBs = parseFloat(cxp.MtoPagos) || 0;
-            }
+            const portalPagos = parseFloat(cxp.TotalBsAbonado) || 0;
+            const saintPagos = parseFloat(cxp.MtoPagos) || 0;
+            abonoBs = Math.max(portalPagos, saintPagos);
+            
             saldoTargetBs = roundFixed(newMtoBs - abonoBs);
             if (saldoTargetBs < 0) saldoTargetBs = 0;
         }
         
         let finalBs = roundFixed(saldoTargetBs - retencionBs - retenIslrBs);
         if (finalBs < 0) finalBs = 0;
+        if (isFullyPaid) finalBs = 0; // Double ensure no negative/micro cents create ghosts
 
         const equivUsd = currentTasa > 0 ? (finalBs / currentTasa) : 0;
             
@@ -3291,6 +3299,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- Lógica de Ajuste por Remanente ---
         const checkAjuste = document.getElementById('abPermitirAjuste');
         if (checkAjuste && checkAjuste.checked) {
+            
+            const motiID = document.getElementById('abMotivoAjuste')?.value;
+            const motiText = motiID ? document.getElementById('abMotivoAjuste').options[document.getElementById('abMotivoAjuste').selectedIndex].text : '';
+            
+            if (!motiID) {
+                showToast('⚠️ Seleccione el Motivo del Ajuste Contable antes de proceder.', 'warning');
+                return;
+            }
+
             let pctDescuento = 0;
             if (document.getElementById('abProntoPago')?.checked && document.getElementById('abTipoDescuento')) {
                 pctDescuento = parseFloat(document.getElementById('abTipoDescuento').value) || 0;
@@ -3302,18 +3319,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 pctDesc: pctDescuento,
                 islrRate: parseFloat(document.getElementById('abConceptoISLR')?.value) || 0
             });
-            const pagoReal = parseFloat(abMontoBs.value) || 0;
-             const deudaReal = currentCxpStatus.Saldo || 0;
-            const diferencia = (deudaReal - pagoReal);
+            let pagoReal = parseFloat(abMontoBs.value) || 0;
+            const deudaAcumuladaBs = fin.finalBs; // Lo que realmente se exige hoy en día
+            let diferencia = (deudaAcumuladaBs - pagoReal);
+            
+            // Universal Auto-Split overpayment shield: Si pagan más de la deuda ERP, exigimos split para proteger Saint
+            let deudaOriginalBs = currentCxpStatus.Saldo || 0;
+            if (deudaOriginalBs <= 0) deudaOriginalBs = currentCxpStatus.Monto || 0;
+            
+            if (pagoReal > deudaOriginalBs && deudaOriginalBs > 0) {
+                 const tasaAplicada = abAplicaIndex.checked ? (parseFloat(abTasa.value) || 1) : (currentCxpStatus.TasaEmision || 1);
+                 const overpay = pagoReal - deudaOriginalBs;
+                 pagoReal = deudaOriginalBs; // Cap what goes into ERP
+                 const usdProrrateado = pagoReal / tasaAplicada;
+                 
+                 formData.set('MontoBsAbonado', pagoReal.toFixed(2));
+                 formData.set('MontoUsdAbonado', usdProrrateado.toFixed(2));
+                 diferencia = overpay; // The excess goes to Ajuste local table
+            } else {
+                 diferencia = (deudaAcumuladaBs - pagoReal); // Normal discrepancy 
+            }
+            
             if (diferencia > 0) {
-                const motiID = document.getElementById('abMotivoAjuste')?.value;
-                if (!motiID) {
-                    showToast('⚠️ Seleccione el Motivo del Ajuste Contable antes de proceder.', 'warning');
-                    return;
-                }
-                const umbral = deudaReal * 0.10;
+                const umbral = deudaAcumuladaBs * 0.10;
                 if (diferencia > umbral) {
-                    const r = confirm(`El ajuste contable a generar supera el 10% de la deuda original. ¿Desea proceder con este Write-off de exceso?`);
+                    const r = confirm(`El ajuste contable a generar supera el 10% de la deuda exigida. ¿Desea proceder con este Ajuste de exceso?`);
                     if (!r) return;
                 }
                 formData.append('MontoAjusteBs', diferencia.toFixed(2));
@@ -4203,15 +4233,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 // Calculate missing amount for this row
                 let montoAjusteBs = 0;
+                let finalMontoBs = montoBs;
+                let finalMontoUsd = montoUsd;
                 
                 if (isAjusteActivo) {
+                    const motiElement = document.getElementById('pmMotivoAjuste');
+                    const motiText = motiElement && motiElement.selectedIndex >= 0 ? motiElement.options[motiElement.selectedIndex].text : '';
                     if (cxp) {
-                        const deudaReal = cxp.Saldo || 0;
-                        const dif = +(deudaReal - montoBs).toFixed(2);
-                        if (dif > 0) {
-                            montoAjusteBs = dif;
-                            if (dif > (deudaReal * 0.10)) {
-                                showAlert10Pct = true;
+                        let deudaReal = cxp.Saldo || 0;
+                        if (deudaReal <= 0) deudaReal = cxp.Monto || 0;
+                        
+                        // Universal Auto-split overpayment shield (protect ERP balances)
+                        if (montoBs > deudaReal && deudaReal > 0) {
+                            montoAjusteBs = +(montoBs - deudaReal).toFixed(2);
+                            finalMontoBs = deudaReal;
+                            const tasaAplicada = tasa || cxp.TasaEmision || 1;
+                            finalMontoUsd = +(finalMontoBs / tasaAplicada).toFixed(2);
+                        } else {
+                            const dif = +(deudaReal - montoBs).toFixed(2);
+                            if (dif > 0) {
+                                montoAjusteBs = dif;
+                                if (dif > (deudaReal * 0.10)) {
+                                    showAlert10Pct = true;
+                                }
                             }
                         }
                     }
@@ -4222,11 +4266,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     NumeroD: rawNumeroD,
                     CodProv: codProv,
                     FechaAbono: row.querySelector('.pm-fecha')?.value,
-                    MontoBsAbonado: montoBs,
+                    MontoBsAbonado: finalMontoBs,
                     MontoAjusteBs: montoAjusteBs,
                     MotivoAjusteID: document.getElementById('pmMotivoAjuste')?.value || null,
                     TasaCambioDiaAbono: indexado ? tasa : (cxp?.TasaEmision || 0),
-                    MontoUsdAbonado: montoUsd,
+                    MontoUsdAbonado: finalMontoUsd,
                     AplicaIndexacion: indexado || false,
                     Referencia: referencia
                 });
