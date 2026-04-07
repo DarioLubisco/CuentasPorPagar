@@ -385,8 +385,22 @@ document.addEventListener('DOMContentLoaded', () => {
             mtoTotalUsd = roundFixed(newMtoBs / (currentTasa > 0 ? currentTasa : 1));
         }
 
-        const totalUsdAbonado = parseFloat(cxp.TotalUsdAbonado) || 0;
-        let remainingUsd = mtoTotalUsd - totalUsdAbonado;
+        const portalUsdAbonado = parseFloat(cxp.TotalUsdAbonado) || 0;
+        const saintPagosBs = parseFloat(cxp.MtoPagos) || 0;
+        const portalPagosBs = parseFloat(cxp.TotalBsAbonado) || 0;
+        
+        let estimatedSaintUsd = 0;
+        if (saintPagosBs > portalPagosBs) {
+             let origMonto = parseFloat(cxp.Monto) || 1;
+             if (origMonto <= 0) origMonto = 1;
+             let p = saintPagosBs / origMonto;
+             if (p > 1) p = 1;
+             estimatedSaintUsd = mtoTotalUsd * p;
+        }
+        
+        let amortizedUsd = Math.max(portalUsdAbonado, estimatedSaintUsd);
+
+        let remainingUsd = mtoTotalUsd - amortizedUsd;
         if (remainingUsd < 0) remainingUsd = 0;
         
         let saldoTargetBs = 0;
@@ -4488,6 +4502,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (document.getElementById('cfgISLRPersonaSource')) {
                     document.getElementById('cfgISLRPersonaSource').value = window.globalRetConfig?.ISLRPersonaSource || 'SAINT';
                 }
+                if (document.getElementById('cfgAntigravityFlow')) {
+                    document.getElementById('cfgAntigravityFlow').value = window.globalRetConfig?.AntigravityFlow || 90;
+                }
                 loadMotivosConfig();
             } catch (e) {
                 console.error('Error fetching config', e);
@@ -4575,10 +4592,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // Save ISLRPersonaSource and ToleranceSaldo to Procurement.Settings
             const islrSrc = document.getElementById('cfgISLRPersonaSource')?.value;
             const toleranceVal = document.getElementById('cfgToleranceSaldo')?.value;
-            if (islrSrc || toleranceVal) {
+            const antigravityFlow = document.getElementById('cfgAntigravityFlow')?.value;
+            
+            if (islrSrc || toleranceVal || antigravityFlow) {
                 const settingsPayload = {};
                 if (islrSrc) settingsPayload.ISLRPersonaSource = islrSrc;
                 if (toleranceVal) settingsPayload.ToleranceSaldo = toleranceVal;
+                if (antigravityFlow) settingsPayload.AntigravityFlow = antigravityFlow;
 
                 fetch('/api/procurement/settings', {
                     method: 'POST',
@@ -4587,6 +4607,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }).then(() => { 
                     if (islrSrc) window.globalRetConfig.ISLRPersonaSource = islrSrc;
                     if (toleranceVal) window.globalRetConfig.ToleranceSaldo = toleranceVal;
+                    if (antigravityFlow) window.globalRetConfig.AntigravityFlow = antigravityFlow;
                 });
             }
 
@@ -5088,3 +5109,95 @@ document.addEventListener('DOMContentLoaded', () => {
     initProvidersDatalist();
 
 });
+
+// ==========================================
+// ANTIGRAVITY ENGINE CLIENT LOGIC
+// ==========================================
+window.runAntigravity = async function() {
+    const usdFormat = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format;
+    const bsFormat = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format;
+    try {
+        const btn = document.getElementById('btnAntigravity');
+        btn.innerHTML = '<i class="loader" style="width:16px;height:16px;border-color:var(--primary-accent);border-bottom-color:transparent;display:inline-block;vertical-align:middle;"></i> Procesando...';
+        btn.disabled = true;
+
+        // Get saved config
+        let pctFlow = 0.90;
+        if (window.globalRetConfig && window.globalRetConfig.AntigravityFlow) {
+            pctFlow = parseFloat(window.globalRetConfig.AntigravityFlow) / 100.0;
+        }
+
+        // Get saved cashflow baseline configuration
+        const savedFcParams = JSON.parse(localStorage.getItem('cashflowParams') || '{}');
+        const cajaUsd = savedFcParams.cajaUsd || parseFloat(document.getElementById('paramCajaUsd')?.value) || 0;
+        const cajaBs = savedFcParams.cajaBs || parseFloat(document.getElementById('paramCajaBs')?.value) || 0;
+        let fechaCero = savedFcParams.fechaCero || document.getElementById('paramFechaCero')?.value;
+        const delayDays = savedFcParams.delayDays !== undefined ? savedFcParams.delayDays : 1;
+        
+        if (!fechaCero) {
+            const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+            fechaCero = (new Date(Date.now() - tzoffset)).toISOString().split('T')[0];
+        }
+
+        const res = await fetch('/api/antigravity/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ 
+                porcentaje_flujo: pctFlow,
+                caja_usd: cajaUsd,
+                caja_bs: cajaBs,
+                fecha_arranque: fechaCero,
+                delay_days: delayDays
+            })
+        });
+
+        if (!res.ok) throw new Error("Error en el motor Antigravity");
+        const data = await res.json();
+
+        // Populate Modal
+        document.getElementById('antigDevMensual').innerText = (data.metrics.r_dev_daily * 30 * 100).toFixed(2) + "%";
+        document.getElementById('antigAhorroUsd').innerText = "$ " + usdFormat(data.metrics.total_savings_usd || 0);
+        document.getElementById('antigGastoUsd').innerText = "$ " + usdFormat(data.metrics.total_cost_usd || 0);
+        document.getElementById('antigLimiteFlujo').innerText = (pctFlow * 100).toFixed(0) + "%";
+
+        const tbody = document.getElementById('antigravityTableBody');
+        tbody.innerHTML = '';
+        if (data.schedule && data.schedule.length > 0) {
+            // Sort schedule by Date then by Savings descending
+            data.schedule.sort((a,b) => a.date_t - b.date_t || b.savings - a.savings);
+            
+            data.schedule.forEach(item => {
+                const tr = document.createElement('tr');
+                let noteHtml = item.note ? `<span title="${item.note}">⚠️</span>` : '';
+                tr.innerHTML = `
+                    <td>${item.date_str.substring(0,10)} ${noteHtml}</td>
+                    <td style="color:var(--text-secondary)">${(item.due_date_str || '').substring(0,10)}</td>
+                    <td>${item.id}</td>
+                    <td>${item.supplier}</td>
+                    <td><span class="status-badge" style="background: ${item.priority==='Alta'?'rgba(239, 68, 68, 0.1)':(item.priority==='Media'?'rgba(245, 158, 11, 0.1)':'rgba(59, 130, 246, 0.1)')}; color: ${item.priority==='Alta'?'#ef4444':(item.priority==='Media'?'#f59e0b':'#3b82f6')}">${item.priority}</span></td>
+                    <td class="amount" style="color:var(--text-secondary)">Bs ${bsFormat(item.orig_bs)}</td>
+                    <td class="amount">Bs ${bsFormat(item.final_bs)}</td>
+                    <td class="amount">$ ${usdFormat(item.usd_cost)}</td>
+                    <td class="amount" style="color:var(--success); font-weight:bold;">$ ${usdFormat(item.savings)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;">No hay pagos pendientes para optimizar.</td></tr>';
+        }
+
+        forceShowModal(document.getElementById('antigravityModal'));
+    } catch (err) {
+        console.error(err);
+        showToast("Falla de ejecución Antigravity", "error");
+    } finally {
+        const btn = document.getElementById('btnAntigravity');
+        btn.innerHTML = '<i data-lucide="zap"></i> Finanza dinamica';
+        btn.disabled = false;
+        if (window.lucide) window.lucide.createIcons();
+    }
+};
+
+window.closeAntigravityModal = function() {
+    forceHideModal(document.getElementById('antigravityModal'));
+};

@@ -724,6 +724,71 @@ El equipo de Administracion."""
             part.add_header("Content-Disposition", f"attachment; filename=Comprobante_Pago_{fn_suffix}{ext}")
             msg.attach(part)
         
+        # ==========================================
+        # ANEXAR RETENCIONES DE IVA E ISLR (SI EXISTEN y ESTAN GENERADAS)
+        # ==========================================
+        try:
+            import database
+            conn_ret = database.get_db_connection()
+            cursor_ret = conn_ret.cursor()
+            numeros_d = [p.get('NumeroD') for p in pagos_list if p.get('NumeroD')]
+            cod_prov = pagos_list[0].get('CodProv') if pagos_list else None
+            
+            if numeros_d and cod_prov:
+                placeholders = ','.join(['?'] * len(numeros_d))
+                
+                # Obtener configuración para el PDF
+                cursor_ret.execute("SELECT RIF_Agente, RazonSocial_Agente, DireccionFiscal_Agente, ValorUT, UltimoSecuencial FROM EnterpriseAdmin_AMC.Procurement.Retenciones_Config WHERE Id = 1")
+                cfg_row = cursor_ret.fetchone()
+                config = dict(zip([c[0] for c in cursor_ret.description], cfg_row)) if cfg_row else {}
+                
+                from itertools import groupby
+                
+                # --- IVA ---
+                cursor_ret.execute(f"SELECT r.*, p.Descrip as ProveedorNombre FROM EnterpriseAdmin_AMC.Procurement.Retenciones_IVA r LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV p ON r.CodProv = p.CodProv WHERE r.CodProv = ? AND r.NumeroD IN ({placeholders}) AND r.Estado <> 'ANULADO'", [cod_prov] + numeros_d)
+                iva_rows = cursor_ret.fetchall()
+                if iva_rows:
+                    cols = [c[0] for c in cursor_ret.description]
+                    iva_list = [dict(zip(cols, row)) for row in iva_rows]
+                    iva_list.sort(key=lambda x: str(x.get('NumeroComprobante', '')))
+                    for nro_comp, group in groupby(iva_list, key=lambda x: str(x.get('NumeroComprobante', ''))):
+                        if not nro_comp or nro_comp == 'None': continue
+                        g_list = list(group)
+                        # calls generar_pdf_retencion defined later
+                        pdf_bytes = generar_pdf_retencion(config, g_list)
+                        part_pdf = MIMEBase("application", "pdf")
+                        part_pdf.set_payload(pdf_bytes)
+                        encoders.encode_base64(part_pdf)
+                        part_pdf.add_header("Content-Disposition", f"attachment; filename=Retencion_IVA_{nro_comp}.pdf")
+                        msg.attach(part_pdf)
+
+                # --- ISLR ---
+                cursor_ret.execute(f"SELECT r.*, p.Descrip as ProveedorNombre FROM EnterpriseAdmin_AMC.Procurement.Retenciones_ISLR r LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV p ON r.CodProv = p.CodProv WHERE r.CodProv = ? AND r.NumeroD IN ({placeholders}) AND r.Estado <> 'ANULADO'", [cod_prov] + numeros_d)
+                islr_rows = cursor_ret.fetchall()
+                if islr_rows:
+                    cols = [c[0] for c in cursor_ret.description]
+                    islr_list = [dict(zip(cols, row)) for row in islr_rows]
+                    islr_list.sort(key=lambda x: str(x.get('NumeroComprobante', '')))
+                    for nro_comp, group in groupby(islr_list, key=lambda x: str(x.get('NumeroComprobante', ''))):
+                        if not nro_comp or nro_comp == 'None': continue
+                        g_list = list(group)
+                        try:
+                            pdf_bytes = generar_pdf_islr(config, g_list)
+                            part_pdf = MIMEBase("application", "pdf")
+                            part_pdf.set_payload(pdf_bytes)
+                            encoders.encode_base64(part_pdf)
+                            part_pdf.add_header("Content-Disposition", f"attachment; filename=Retencion_ISLR_{nro_comp}.pdf")
+                            msg.attach(part_pdf)
+                        except NameError:
+                            logging.warning("generar_pdf_islr no definido, no se anexa PDF de ISLR.")
+                        except Exception as e:
+                            logging.error(f"Error generando PDF ISLR: {e}", exc_info=True)
+                            
+        except Exception as e:
+            logging.error(f"Error adjuntando retenciones: {e}", exc_info=True)
+        finally:
+            if 'conn_ret' in locals(): conn_ret.close()
+        
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
         service.users().messages().send(userId='me', body={'raw': raw}).execute()
         logging.info(f"Correo enviado exitosamente a {', '.join(emails)} via Gmail API")
@@ -2441,6 +2506,110 @@ async def report_forecast_consolidated(
     finally:
         if 'conn' in locals(): conn.close()
 
+from pydantic import BaseModel
+class AntigravityRequest(BaseModel):
+    porcentaje_flujo: float = 0.90 
+    caja_usd: float = 0.0
+    caja_bs: float = 0.0
+    fecha_arranque: str = None
+    delay_days: int = 1 
+
+@app.post("/api/antigravity/run")
+async def run_antigravity_optimizer(payload: AntigravityRequest):
+    try:
+        from antigravity_core import AntigravityEngine
+        conn = database.get_db_connection()
+        engine = AntigravityEngine(conn)
+        cursor = conn.cursor()
+        
+        # 1. Fetch Invoices
+        inv_query = """
+            SELECT 
+                SAACXP.NroUnico, SAPROV.CodProv, SAPROV.Descrip,
+                SAACXP.Saldo, SAACXP.FechaE, SAACXP.FechaV,
+                ISNULL(dt_emision.dolarbcv, 1) AS tc_emision,
+                ISNULL(PC.DiasNoIndexacion, 15) AS t_tolerance,
+                ISNULL(PC.DiasVencimiento, 30) AS t_due,
+                ISNULL(PC.ProntoPago1_Dias, 0) AS t_d1,
+                ISNULL(PC.ProntoPago1_Pct, 0) / 100.0 AS d1_pct,
+                ISNULL(PC.ProntoPago2_Dias, 0) AS t_d2,
+                ISNULL(PC.ProntoPago2_Pct, 0) / 100.0 AS d2_pct
+            FROM dbo.SAACXP WITH (NOLOCK)
+            LEFT JOIN dbo.SAPROV WITH (NOLOCK) ON SAACXP.CodProv = SAPROV.CodProv
+            LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones PC WITH (NOLOCK) ON SAPROV.CodProv = PC.CodProv
+            OUTER APPLY (
+                SELECT TOP 1 dolarbcv 
+                FROM EnterpriseAdmin_AMC.dbo.dolartoday WITH (NOLOCK)
+                WHERE CAST(fecha AS DATE) <= CAST(SAACXP.FechaE AS DATE) AND dolarbcv IS NOT NULL
+                ORDER BY fecha DESC
+            ) dt_emision
+            WHERE SAACXP.Saldo > 0 AND SAACXP.TipoCxP = '10'
+        """
+        cursor.execute(inv_query)
+        columns = [column[0] for column in cursor.description]
+        db_invoices = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        from datetime import date, timedelta
+        today_date = date.today()
+        
+        invoices_payload = []
+        for row in db_invoices:
+            if isinstance(row["FechaE"], str):
+                from datetime import datetime
+                fecha_e = datetime.fromisoformat(row["FechaE"].split("T")[0]).date()
+            else:
+                fecha_e = row["FechaE"].date()
+                
+            if isinstance(row["FechaV"], str):
+                from datetime import datetime
+                fecha_v = datetime.fromisoformat(row["FechaV"].split("T")[0]).date()
+            elif row["FechaV"]:
+                fecha_v = row["FechaV"].date()
+            else:
+                # Fallback to configured days if SAACXP.FechaV is null
+                fecha_v = fecha_e + timedelta(days=int(row["t_due"]))
+                
+            elapsed = (today_date - fecha_e).days
+            calc_t_due = max(0, (fecha_v - fecha_e).days)
+            
+            invoices_payload.append({
+                "id": str(row["NroUnico"]),
+                "supplier": row["Descrip"],
+                "nominal_bs": float(row["Saldo"]),
+                "tc_emision": float(row["tc_emision"]),
+                "days_elapsed_since_emission": elapsed,
+                "t_tolerance": int(row["t_tolerance"]),
+                "t_due": calc_t_due,
+                "t_d1": int(row["t_d1"]),
+                "d1_pct": float(row["d1_pct"]),
+                "t_d2": int(row["t_d2"]),
+                "d2_pct": float(row["d2_pct"]),
+                "priority": "Media" 
+            })
+            
+        d_fecha = payload.fecha_arranque if payload.fecha_arranque else today_date.isoformat()
+        await_flow = await report_forecast_consolidated(
+            desde=d_fecha, 
+            hasta=None, 
+            fecha_arranque=d_fecha,
+            caja_usd=payload.caja_usd,
+            caja_bs=payload.caja_bs,
+            delay_days=payload.delay_days
+        )
+        cashflow_timeline = await_flow["data"]
+        
+        result = engine.optimize_payable_schedule(cashflow_timeline, invoices_payload, payload.porcentaje_flujo)
+        
+        return result
+    except Exception as e:
+        if 'conn' in locals(): conn.rollback()
+        import logging
+        logging.error(f"Engine Error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+
 @app.get("/api/forecast-events")
 async def get_forecast_events():
     try:
@@ -3041,6 +3210,8 @@ def generar_pdf_retencion(config: dict, retenciones: list) -> bytes:
     pdf.set_font('Helvetica', '', 9)
     # Using fixed width for multi_cell to guarantee clean line wrap for subsequent labels
     pdf.multi_cell(0, 6, str(config.get("DireccionFiscal_Agente", "")), 0, 'L')
+    pdf.set_x(15)
+
     
     pdf.set_font('Helvetica', 'B', 9)
     pdf.cell(45, 6, "Nro. Comprobante:", 0, 0)
@@ -3873,6 +4044,145 @@ async def anular_retencion_islr(id_ret: int):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if 'conn' in locals(): conn.close()
+
+# --- PDF Generation for ISLR ---
+def generar_pdf_islr(config: dict, retenciones: list) -> bytes:
+    from fpdf import FPDF
+    from datetime import datetime
+
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    
+    # Colors
+    header_bg = (0, 102, 51)   # Dark green for ISLR
+    header_fg = (255, 255, 255)
+    row_alt = (230, 250, 240)
+    
+    # --- Header ---
+    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_fill_color(*header_bg)
+    pdf.set_text_color(*header_fg)
+    pdf.cell(0, 10, 'COMPROBANTE DE RETENCIÓN DE ISLR', 0, 1, 'C', fill=True)
+    pdf.ln(3)
+    
+    # --- Agente info ---
+    nro_comprobante = retenciones[0].get("NumeroComprobante", "N/A") if retenciones else "N/A"
+    fecha_ret = str(retenciones[0].get("FechaRetencion", ""))[:10] if retenciones else "N/A"
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "Agente de Retención:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.cell(0, 6, str(config.get("RazonSocial_Agente", "")), 0, 1)
+
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "RIF:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.cell(0, 6, str(config.get("RIF_Agente", "")), 0, 1)
+
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "Dirección Fiscal:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.multi_cell(0, 6, str(config.get("DireccionFiscal_Agente", "")), 0, 'L')
+    pdf.set_x(15)
+    
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "Nro. Comprobante:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.cell(0, 6, str(nro_comprobante), 0, 1)
+
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "Fecha de Retención:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.cell(0, 6, str(fecha_ret), 0, 1)
+    pdf.ln(3)
+    
+    # --- Sujeto Retenido ---
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "Sujeto Retenido:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    prov_name = retenciones[0].get("ProveedorNombre") or retenciones[0].get("CodProv", "")
+    pdf.cell(0, 6, str(prov_name), 0, 1)
+    pdf.set_font('Helvetica', 'B', 9)
+    pdf.cell(45, 6, "RIF Proveedor:", 0, 0)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.cell(0, 6, str(retenciones[0].get("CodProv", "")), 0, 1)
+    pdf.ln(5)
+    
+    # --- Table Header ---
+    cols = [
+        ("Factura", 25), ("Nro Control", 25), 
+        ("Monto Total", 25), ("Base Imponible", 25), 
+        ("Ret. %", 15), ("Sustraendo", 25), ("Monto Retenido", 25)
+    ]
+    
+    pdf.set_font('Helvetica', 'B', 7)
+    pdf.set_fill_color(*header_bg)
+    pdf.set_text_color(*header_fg)
+    for name, width in cols:
+        pdf.cell(width, 7, name, 1, 0, 'C', fill=True)
+    pdf.ln()
+    
+    # --- Table Rows ---
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Helvetica', '', 7)
+    
+    total_monto = 0
+    total_base = 0
+    total_sustraendo = 0
+    total_retenido = 0
+    
+    for i, r in enumerate(retenciones):
+        if i % 2 == 1:
+            pdf.set_fill_color(*row_alt)
+            fill = True
+        else:
+            fill = False
+            
+        monto = float(r.get("MontoTotalBs") or r.get("MontoTotal", 0))
+        base = float(r.get("BaseImponibleBs") or r.get("BaseImponible", 0))
+        alicuota = float(r.get("AlicuotaPct", 0))
+        sustraendo = float(r.get("SustraendoBs", 0))
+        retenido = float(r.get("MontoRetenido", 0))
+        
+        total_monto += monto
+        total_base += base
+        total_sustraendo += sustraendo
+        total_retenido += retenido
+        
+        row_data = [
+            str(r.get("NumeroD", "")),
+            str(r.get("NroCtrol", "")),
+            f"{monto:,.2f}",
+            f"{base:,.2f}",
+            f"{alicuota:.2f}%",
+            f"{sustraendo:,.2f}",
+            f"{retenido:,.2f}"
+        ]
+        for j, (name, width) in enumerate(cols):
+            align = 'R' if j >= 2 else 'L'
+            pdf.cell(width, 6, row_data[j], 1, 0, align, fill=fill)
+        pdf.ln()
+    
+    # --- Totals ---
+    pdf.set_font('Helvetica', 'B', 7)
+    pdf.set_fill_color(220, 220, 220)
+    
+    prep_width = cols[0][1] + cols[1][1]
+    pdf.cell(prep_width, 7, 'TOTALES:', 1, 0, 'R', fill=True)
+    pdf.cell(cols[2][1], 7, f"{total_monto:,.2f}", 1, 0, 'R', fill=True)
+    pdf.cell(cols[3][1], 7, f"{total_base:,.2f}", 1, 0, 'R', fill=True) 
+    pdf.cell(cols[4][1], 7, "", 1, 0, 'C', fill=True)
+    pdf.cell(cols[5][1], 7, f"{total_sustraendo:,.2f}", 1, 0, 'R', fill=True)
+    pdf.cell(cols[6][1], 7, f"{total_retenido:,.2f}", 1, 0, 'R', fill=True)
+    pdf.ln(12)
+    
+    # --- Footer ---
+    pdf.set_font('Helvetica', '', 8)
+    pdf.cell(0, 5, f"Documento generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}", 0, 1, 'C')
+    
+    return pdf.output()
 
 if __name__ == "__main__":
     import uvicorn # type: ignore
