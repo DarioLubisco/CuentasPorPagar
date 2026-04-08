@@ -2949,20 +2949,83 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('abBtnRetIva')?.addEventListener('click', () => {
         const codProv = abCodProv.value;
         const numeroD = abNumeroD.value;
-        closeAbonosModal();
-        openRetencionFromMain(codProv, numeroD);
+        const btn = document.getElementById('abBtnRetIva');
+        if (btn && btn.dataset.yaCreada === "true") {
+            window.open(`/api/retenciones/by-invoice/${encodeURIComponent(numeroD)}/pdf?cod_prov=${encodeURIComponent(codProv)}`, '_blank');
+        } else {
+            closeAbonosModal();
+            openRetencionFromMain(codProv, numeroD);
+        }
     });
 
     document.getElementById('abBtnRetIslr')?.addEventListener('click', () => {
         const codProv = abCodProv.value;
         const numeroD = abNumeroD.value;
-        closeAbonosModal();
-        openRetencionIslrFromMain(codProv, numeroD);
+        const btn = document.getElementById('abBtnRetIslr');
+        if (btn && btn.dataset.yaCreada === "true") {
+            window.open(`/api/retenciones-islr/by-invoice/${encodeURIComponent(numeroD)}/pdf?cod_prov=${encodeURIComponent(codProv)}`, '_blank');
+        } else {
+            closeAbonosModal();
+            openRetencionIslrFromMain(codProv, numeroD);
+        }
     });
+
+    // Helper for NC / ND visualization
+    window.visualizeAbono = (tipoAbono) => {
+        if (!window.currentCxpStatus || !window.currentCxpStatus.HistorialAbonos) return;
+        const ab = window.currentCxpStatus.HistorialAbonos.find(a => a.TipoAbono === tipoAbono);
+        if (!ab) {
+            showToast('Documento no encontrado', 'error');
+            return;
+        }
+        
+        let m = document.getElementById('visualizeDocModal');
+        if (!m) {
+            m = document.createElement('div');
+            m.id = 'visualizeDocModal';
+            m.className = 'modal-backdrop';
+            m.innerHTML = `
+                <div class="modal-card" style="max-width: 500px;">
+                    <div class="modal-header">
+                        <h2 id="visModalTitle" style="font-size: 1.25rem; font-weight:600; display:flex; align-items:center;"></h2>
+                        <button class="btn-icon" onclick="forceHideModal(document.getElementById('visualizeDocModal'))">&times;</button>
+                    </div>
+                    <div class="modal-body" style="font-size: 0.95rem; line-height: 1.8; color: var(--text-primary);">
+                        <div style="background:var(--bg-body); border-radius:8px; padding: 1.2rem; border: 1px solid var(--border-color);" id="visModalBody"></div>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn-secondary" onclick="forceHideModal(document.getElementById('visualizeDocModal'))">Cerrar Visualización</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(m);
+        }
+        
+        let titleHtml = tipoAbono;
+        if (tipoAbono === 'NOTA_CREDITO') titleHtml = '<i data-lucide="file-minus" style="color:var(--primary); margin-right:8px;"></i> Nota de Crédito Registrada';
+        if (tipoAbono === 'NOTA_DEBITO') titleHtml = '<i data-lucide="file-plus" style="color:var(--danger); margin-right:8px;"></i> Nota de Débito Registrada';
+        
+        document.getElementById('visModalTitle').innerHTML = titleHtml;
+        document.getElementById('visModalBody').innerHTML = `
+            <div style="display:flex; justify-content:space-between; margin-bottom:12px;"><strong>Referencia/Nro:</strong> <span>${ab.Referencia || ab.DescripcionAjuste || 'S/N'}</span></div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:12px;"><strong>Fecha Registro:</strong> <span>${formatDate(ab.FechaAbono)}</span></div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:12px;"><strong>Monto Local (Bs):</strong> <span style="font-weight:600;">${formatBs(ab.MontoBsAbonado)}</span></div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:12px;"><strong>Monto Ref ($):</strong> <span>${usdFormatter(ab.MontoUsdAbonado)}</span></div>
+            ${ab.Observaciones ? `<div style="margin-top:16px; border-top:1px solid var(--border-color); padding-top:12px;"><strong>Observaciones:</strong><p style="margin-top:6px; color:var(--text-secondary);">${ab.Observaciones}</p></div>` : ''}
+        `;
+        
+        forceShowModal(m);
+        if(window.lucide) window.lucide.createIcons();
+    };
 
     document.getElementById('abBtnNC')?.addEventListener('click', () => {
         const codProv = abCodProv.value;
         const numeroD = abNumeroD.value;
+        const btn = document.getElementById('abBtnNC');
+        if (btn && btn.dataset.yaCreada === "true") {
+            visualizeAbono('NOTA_CREDITO');
+            return;
+        }
         closeAbonosModal();
         openNCFromMain(codProv, numeroD);
     });
@@ -2970,6 +3033,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('abBtnND')?.addEventListener('click', () => {
         const codProv = abCodProv.value;
         const numeroD = abNumeroD.value;
+        const btn = document.getElementById('abBtnND');
+        if (btn && btn.dataset.yaCreada === "true") {
+            visualizeAbono('NOTA_DEBITO');
+            return;
+        }
         closeAbonosModal();
         if (window.currentNdDiff > 0) {
             document.getElementById('regNdInputNumero').value = '';
@@ -3165,35 +3233,49 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnRetIva  = document.getElementById('abBtnRetIva');
         const btnRetIslr = document.getElementById('abBtnRetIslr');
         const btnND      = document.getElementById('abBtnND');
+        const btnNC      = document.getElementById('abBtnNC');
 
-        // Ret. IVA: solo si el documento tiene IVA y no se ha retenido antes
         const hasIva = (parseFloat(cxp.TGravable) || 0) > 0 && (parseFloat(cxp.MtoTax) || 0) > 0;
         const ivaYaRetenida = (parseFloat(cxp.RetencionIvaAbonada) || 0) > 0;
         
         if (btnRetIva) {
-            btnRetIva.disabled = !hasIva || ivaYaRetenida;
-            btnRetIva.title = !hasIva 
+            btnRetIva.disabled = !hasIva && !ivaYaRetenida;
+            btnRetIva.dataset.yaCreada = ivaYaRetenida;
+            btnRetIva.title = (!hasIva && !ivaYaRetenida)
                 ? 'Este documento no incluye IVA' 
                 : ivaYaRetenida 
-                    ? 'Retención IVA ya registrada' 
+                    ? 'Visualizar Retención IVA' 
                     : 'Generar Retención IVA';
         }
 
-        // Ret. ISLR: solo si no se ha retenido antes
         const islrYaRetenida = (parseFloat(cxp.RetencionIslrAbonada) || 0) > 0;
         if (btnRetIslr) {
-            btnRetIslr.disabled = islrYaRetenida;
+            btnRetIslr.disabled = false;
+            btnRetIslr.dataset.yaCreada = islrYaRetenida;
             btnRetIslr.title = islrYaRetenida 
-                ? 'Retención ISLR ya registrada' 
+                ? 'Visualizar Retención ISLR' 
                 : 'Generar Retención ISLR';
         }
+        
+        const tieneNC = (cxp.HistorialAbonos || []).some(a => a.TipoAbono === 'NOTA_CREDITO');
+        if (btnNC) {
+            btnNC.disabled = false;
+            btnNC.dataset.yaCreada = tieneNC;
+            btnNC.title = tieneNC ? "Visualizar Nota de Crédito" : "Generar Nota de Crédito";
+        }
 
+        const tieneND = (cxp.HistorialAbonos || []).some(a => a.TipoAbono === 'NOTA_DEBITO');
         if (btnND) {
+            btnND.disabled = false;
+            btnND.dataset.yaCreada = tieneND;
             const originalBsDebt = (Math.round(((fin.mtoTotalUsd - (parseFloat(cxp.TotalUsdAbonado) || 0)) * fin.historicalTasa) * 100) / 100);
             const indexationDiff = fin.saldoTargetBs - originalBsDebt;
             window.currentNdDiff = indexationDiff > 0 ? indexationDiff : 0; 
             
-            if (indexationDiff > 0.01) {
+            if (tieneND) {
+                btnND.title = "Visualizar Nota de Débito";
+                btnND.style.boxShadow = 'none';
+            } else if (indexationDiff > 0.01) {
                btnND.style.boxShadow = '0 0 8px rgba(239, 68, 68, 0.6)';
                btnND.title = `Indexación detectada: Bs ${indexationDiff.toFixed(2)}`;
             } else {

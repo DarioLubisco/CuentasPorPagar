@@ -72,7 +72,7 @@ function renderDebitNotes() {
     tbody.innerHTML = data.map(i => {
         return `<tr>
             <td class="col-checkbox"><input type="checkbox" data-id="${i.NumeroD}" data-prov="${i.CodProv}" class="dn-checkbox"></td>
-            <td><strong>${i.Descrip || i.CodProv}</strong></td>
+            <td><strong>${i.ProveedorNombre || i.Descrip || i.CodProv}</strong></td>
             <td>${i.NumeroD}</td>
             <td>${i.FechaE ? i.FechaE.split('T')[0] : 'N/A'}</td>
             <td style="text-align: right;">${cf.format(i.MontoDocumentoBs || 0)}</td>
@@ -164,7 +164,7 @@ function renderCreditNotes() {
 
     tbody.innerHTML = data.map(i => {
         return `<tr>
-            <td><strong>${i.CodProv}</strong></td>
+            <td><strong>${i.ProveedorNombre || i.Descrip || i.CodProv}</strong></td>
             <td>${i.NumeroD || i.PagoRef || '-'}</td>
             <td><span class="badge ${i.Motivo === 'INDEXACION' ? 'badge-info' : 'badge-default'}">${i.Motivo || 'N/A'}</span></td>
             <td class="amount" style="font-weight:bold; color:var(--success);">${cf.format(i.MontoBs || 0)}</td>
@@ -256,7 +256,7 @@ function renderRetencionesIva() {
         return `<tr>
             <td style="font-weight: 500; color: var(--primary-accent);">${i.NumeroComprobante}</td>
             <td>${i.NumeroD || '-'}</td>
-            <td>${i.CodProv}</td>
+            <td>${i.ProveedorNombre || i.Descrip || i.CodProv}</td>
             <td>${i.FechaRetencion ? i.FechaRetencion.split('T')[0] : '-'}</td>
             <td style="text-align: right;">${cf.format(i.MontoTotal || 0)}</td>
             <td style="text-align: right; color: var(--danger); font-weight: bold;">${cf.format(i.MontoRetenido || 0)}</td>
@@ -348,7 +348,7 @@ function renderRetencionesIslr() {
         return `<tr>
             <td style="font-weight: 500; color: var(--primary-accent);">${i.NumeroComprobante}</td>
             <td>${i.NumeroD || '-'}</td>
-            <td>${i.CodProv}</td>
+            <td>${i.ProveedorNombre || i.Descrip || i.CodProv}</td>
             <td>${i.FechaRetencion ? i.FechaRetencion.split('T')[0] : '-'}</td>
             <td style="text-align: right;">${cf.format(i.BaseImponibleBs || 0)}</td>
             <td style="text-align: right; color: var(--danger); font-weight: bold;">${cf.format(i.MontoRetenido || 0)}</td>

@@ -3035,7 +3035,12 @@ async def get_retenciones(desde: Optional[str] = None, hasta: Optional[str] = No
         conn = database.get_db_connection()
         cursor = conn.cursor()
         
-        query = "SELECT * FROM EnterpriseAdmin_AMC.Procurement.Retenciones_IVA WHERE 1=1"
+        query = """
+            SELECT r.*, p.Descrip AS ProveedorNombre 
+            FROM EnterpriseAdmin_AMC.Procurement.Retenciones_IVA r
+            LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV p ON r.CodProv = p.CodProv
+            WHERE 1=1
+        """
         params = []
         if desde:
             query += " AND FechaRetencion >= ?"
@@ -3050,6 +3055,9 @@ async def get_retenciones(desde: Optional[str] = None, hasta: Optional[str] = No
         
         columns = [column[0] for column in cursor.description]
         data = [dict(zip(columns, row)) for row in rows]
+        for item in data:
+            if item.get('ProveedorNombre'):
+                item['CodProv'] = f"{item['CodProv']} - {item['ProveedorNombre']}"
         return {"data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -3324,6 +3332,96 @@ def generar_pdf_retencion(config: dict, retenciones: list) -> bytes:
     pdf.cell(0, 5, f"Documento generado el {datetime.now().strftime('%d/%m/%Y %H:%M')}", 0, 1, 'C')
     
     return pdf.output()
+
+@app.get("/api/retenciones/by-invoice/{numero_d}/pdf")
+def get_retencion_pdf_by_invoice(numero_d: str, cod_prov: str = Query(...)):
+    cod_prov = cod_prov.split(" - ")[0].strip()
+    try:
+        import database
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT NumeroComprobante FROM EnterpriseAdmin_AMC.Procurement.Retenciones_IVA WHERE NumeroD = ? AND CodProv = ? AND Estado <> 'ANULADO'", (numero_d, cod_prov))
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            raise HTTPException(status_code=404, detail="Retención no encontrada")
+        nro_comp = row[0]
+        
+        cursor.execute("""
+            SELECT r.*, p.Descrip as ProveedorNombre
+            FROM EnterpriseAdmin_AMC.Procurement.Retenciones_IVA r
+            LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV p ON r.CodProv = p.CodProv
+            WHERE r.NumeroComprobante = ? AND r.Estado <> 'ANULADO'
+        """, (nro_comp,))
+        rows = cursor.fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail="Detalles no encontrados")
+            
+        cols = [column[0] for column in cursor.description]
+        ret_list = [dict(zip(cols, row)) for row in rows]
+        
+        cursor.execute("SELECT RIF_Agente, RazonSocial_Agente, DireccionFiscal_Agente, ValorUT, UltimoSecuencial FROM EnterpriseAdmin_AMC.Procurement.Retenciones_Config WHERE Id = 1")
+        cfg_row = cursor.fetchone()
+        config = dict(zip([c[0] for c in cursor.description], cfg_row)) if cfg_row else {}
+        
+        pdf_bytes = generar_pdf_retencion(config, ret_list)
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=Retencion_IVA_{nro_comp}.pdf"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
+
+@app.get("/api/retenciones-islr/by-invoice/{numero_d}/pdf")
+def get_retencion_islr_pdf_by_invoice(numero_d: str, cod_prov: str = Query(...)):
+    cod_prov = cod_prov.split(" - ")[0].strip()
+    try:
+        import database
+        conn = database.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT NumeroComprobante FROM EnterpriseAdmin_AMC.Procurement.Retenciones_ISLR WHERE NumeroD = ? AND CodProv = ? AND Estado <> 'ANULADO'", (numero_d, cod_prov))
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            raise HTTPException(status_code=404, detail="Retención no encontrada")
+        nro_comp = row[0]
+        
+        cursor.execute("""
+            SELECT r.*, p.Descrip as ProveedorNombre
+            FROM EnterpriseAdmin_AMC.Procurement.Retenciones_ISLR r
+            LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV p ON r.CodProv = p.CodProv
+            WHERE r.NumeroComprobante = ? AND r.Estado <> 'ANULADO'
+        """, (nro_comp,))
+        rows = cursor.fetchall()
+        if not rows:
+            raise HTTPException(status_code=404, detail="Detalles no encontrados")
+            
+        cols = [column[0] for column in cursor.description]
+        ret_list = [dict(zip(cols, row)) for row in rows]
+        
+        cursor.execute("SELECT RIF_Agente, RazonSocial_Agente, DireccionFiscal_Agente, ValorUT, UltimoSecuencial FROM EnterpriseAdmin_AMC.Procurement.Retenciones_Config WHERE Id = 1")
+        cfg_row = cursor.fetchone()
+        config = dict(zip([c[0] for c in cursor.description], cfg_row)) if cfg_row else {}
+        
+        pdf_bytes = generar_pdf_islr(config, ret_list)
+        return StreamingResponse(
+            io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename=Retencion_ISLR_{nro_comp}.pdf"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if 'conn' in locals(): conn.close()
 
 
 @app.get("/api/retenciones/{id_ret}/pdf")
@@ -3685,6 +3783,8 @@ async def get_credit_notes(cod_prov: Optional[str] = None, estatus: Optional[str
         columns = [col[0] for col in cursor.description]
         results = [dict(zip(columns, row)) for row in cursor.fetchall()]
         for r in results:
+            if r.get('ProveedorNombre'):
+                r['CodProv'] = f"{r['CodProv']} - {r['ProveedorNombre']}"
             for k, v in r.items():
                 if hasattr(v, 'quantize'):
                     r[k] = float(v) if v is not None else 0.0
@@ -3907,7 +4007,12 @@ async def get_retenciones_islr(desde: Optional[str] = None, hasta: Optional[str]
         conn = database.get_db_connection()
         cursor = conn.cursor()
 
-        query = "SELECT * FROM EnterpriseAdmin_AMC.Procurement.Retenciones_ISLR WHERE 1=1"
+        query = """
+            SELECT r.*, p.Descrip AS ProveedorNombre 
+            FROM EnterpriseAdmin_AMC.Procurement.Retenciones_ISLR r
+            LEFT JOIN EnterpriseAdmin_AMC.dbo.SAPROV p ON r.CodProv = p.CodProv
+            WHERE 1=1
+        """
         params = []
         if desde:
             query += " AND FechaRetencion >= ?"
@@ -3924,6 +4029,8 @@ async def get_retenciones_islr(desde: Optional[str] = None, hasta: Optional[str]
         data = [dict(zip(columns, row)) for row in rows]
         
         for r in data:
+            if r.get('ProveedorNombre'):
+                r['CodProv'] = f"{r['CodProv']} - {r['ProveedorNombre']}"
             for k, v in r.items():
                 if hasattr(v, 'quantize'):
                     r[k] = float(v) if v is not None else 0.0
