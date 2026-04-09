@@ -317,7 +317,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const calculateInvoiceFinancials = (cxp, { tasaDia, aplicaIndex, aplicaIndexIva, pctDesc, islrRate }) => {
-        const historicalTasa = (cxp.Factor && cxp.Factor > 0 && window.globalRetConfig?.TasaEmisionSource === 'SACOMP') 
+        const historicalTasa = (cxp.Factor && cxp.Factor > 0 && (window.globalRetConfig?.TasaEmisionSource === 'SACOMP' || window.globalRetConfig?.TasaEmisionSource === 'SACOMP_FACTOR')) 
             ? parseFloat(cxp.Factor) 
             : parseFloat(cxp.TasaEmision) || 1;
 
@@ -379,7 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         let mtoTotalUsd = 0;
-        if (pct === 0 && window.globalRetConfig?.MontoUsdSource === 'SACOMP' && cxp.MontoMEx > 0) {
+        if (pct === 0 && (window.globalRetConfig?.MontoUsdSource === 'SACOMP' || window.globalRetConfig?.MontoUsdSource === 'SACOMP_MONOMEX') && cxp.MontoMEx > 0) {
             mtoTotalUsd = parseFloat(cxp.MontoMEx);
         } else {
             mtoTotalUsd = roundFixed(newMtoBs / (currentTasa > 0 ? currentTasa : 1));
