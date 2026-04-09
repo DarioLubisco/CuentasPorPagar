@@ -153,13 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Currency Formatters
     const bsFormatter = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format;
-    const usdFormatter = (val) => {
-        let maxDec = 4;
-        if (window._globalCxpStatus && window._globalCxpStatus.DecimalesTasa === 2) {
-            maxDec = 2;
-        }
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: maxDec }).format(val);
-    };
+    const usdFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format;
     const roundBs = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
     const roundUSD = (n) => Math.round((n + Number.EPSILON) * 10000) / 10000;
 
