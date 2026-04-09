@@ -153,7 +153,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Currency Formatters
     const bsFormatter = new Intl.NumberFormat('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format;
-    const usdFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format;
+    const usdFormatter = (val) => {
+        let maxDec = 4;
+        if (window._globalCxpStatus && window._globalCxpStatus.DecimalesTasa === 2) {
+            maxDec = 2;
+        }
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: maxDec }).format(val);
+    };
+    const roundBs = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+    const roundUSD = (n) => Math.round((n + Number.EPSILON) * 10000) / 10000;
 
     const formatBs = (val) => `Bs ${bsFormatter(val)}`;
 
@@ -323,9 +331,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const currentTasa = (aplicaIndex && tasaDia > 0) ? tasaDia : historicalTasa;
 
-        const tGravableUsd = roundFixed((parseFloat(cxp.TGravable) || 0) / historicalTasa);
+        const tGravableUsd = roundUSD((parseFloat(cxp.TGravable) || 0) / historicalTasa);
         const exentoOrigBs = Math.max(0, (parseFloat(cxp.Monto) || 0) - (parseFloat(cxp.TGravable) || 0) - (parseFloat(cxp.MtoTax) || 0));
-        const exentoUsd = roundFixed(exentoOrigBs / historicalTasa);
+        const exentoUsd = roundUSD(exentoOrigBs / historicalTasa);
 
         let baseBs, exentoBs;
 
@@ -382,7 +390,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pct === 0 && (window.globalRetConfig?.MontoUsdSource === 'SACOMP' || window.globalRetConfig?.MontoUsdSource === 'SACOMP_MONOMEX') && cxp.MontoMEx > 0) {
             mtoTotalUsd = parseFloat(cxp.MontoMEx);
         } else {
-            mtoTotalUsd = roundFixed(newMtoBs / (currentTasa > 0 ? currentTasa : 1));
+            mtoTotalUsd = roundUSD(newMtoBs / (currentTasa > 0 ? currentTasa : 1));
         }
 
         const portalUsdAbonado = parseFloat(cxp.TotalUsdAbonado) || 0;
@@ -434,7 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
         let descUsdMonto = 0;
         if(pct > 0) {
-           descUsdMonto = roundFixed(mtoTotalUsd * (pct / 100.0));
+           descUsdMonto = roundUSD(mtoTotalUsd * (pct / 100.0));
         }
 
         const origTotalUsd = (cxp.MontoMEx > 0) ? parseFloat(cxp.MontoMEx) : ((parseFloat(cxp.Monto) || 0) / historicalTasa);
@@ -2743,6 +2751,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) throw new Error("Factura no encontrada");
             const json = await res.json();
             currentCxpStatus = json.data;
+            window._globalCxpStatus = currentCxpStatus;
             renderCxpStatus();
             // Restore previously saved ISLR concept for this invoice
             const savedIslr = localStorage.getItem(`islr_${numeroD}`);

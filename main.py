@@ -1729,8 +1729,8 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...),
             monto_original_usd = data['Monto'] / data['TasaEmision'] if data['TasaEmision'] else 0
             
         saldo_usd = monto_original_usd - data['TotalUsdAbonado']
-        data['MontoOriginalUSD'] = round(monto_original_usd, 2)
-        data['SaldoRestanteUSD'] = round(saldo_usd, 2)
+        data['MontoOriginalUSD'] = round(monto_original_usd, 4)
+        data['SaldoRestanteUSD'] = round(saldo_usd, 4)
         # Note: DiferenciaBs is typically calculated on the frontend before closing an invoice 
         # based on exactly what was paid vs what the invoice was worth originally,
         # but the backend provides all necessary totals.
@@ -3115,7 +3115,7 @@ async def crear_retencion(payload: dict = Body(...)):
                 tasa_orig = float(sacomp_row[0]) if sacomp_row and sacomp_row[0] else None
                 mto_orig = float(sacomp_row[1]) if sacomp_row and sacomp_row[1] else None
 
-                monto_usd_abonado = round(monto_retenido / tasa_orig, 2) if tasa_orig and tasa_orig > 0 else 0
+                monto_usd_abonado = round(monto_retenido / tasa_orig, 4) if tasa_orig and tasa_orig > 0 else 0
 
                 cursor.execute("SELECT ISNULL(MAX(AbonoID), 0) FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos WITH (UPDLOCK)")
                 new_abono_id = cursor.fetchone()[0] + 1
