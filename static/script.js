@@ -4193,6 +4193,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Write Monto Bs (Defaults to the full debt amount)
             row.querySelector('.pm-monto-bs').value = fin.finalBs.toFixed(2);
+            row.dataset.targetBs = fin.finalBs;
 
             // Equiv USD (for the auto-filled payment amount)
             row.querySelector('.pm-monto-usd').textContent = fin.equivUsd.toFixed(2);
@@ -4201,6 +4202,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // instead of the static database value to prevent incongruencies!
             row.querySelector('.pm-saldo').textContent = fin.equivUsd.toFixed(2);
 
+            if (typeof pmDistributePartialPayment !== 'undefined') pmDistributePartialPayment();
             pmRecalcTotals();
         };
 
@@ -4222,6 +4224,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 const rate = parseFloat(row.querySelector('.pm-tasa')?.value) || 1;
                 usdCell.textContent = rate > 0 ? (bs / rate).toFixed(2) : '0.00';
             }
+        };
+
+        const pmDistributePartialPayment = () => {
+            const montoInput = document.getElementById('pmMontoTotalReal');
+            if (!montoInput || montoInput.dataset.manualEdit !== "true") return;
+            
+            let totalToDistribute = parseFloat(montoInput.value) || 0;
+            document.querySelectorAll('#pmInvoicesTable tr').forEach(row => {
+                let bsTarget = parseFloat(row.dataset.targetBs) || 0;
+                if (totalToDistribute >= bsTarget && bsTarget > 0) {
+                    row.querySelector('.pm-monto-bs').value = bsTarget.toFixed(2);
+                    totalToDistribute -= bsTarget;
+                } else if (totalToDistribute > 0) {
+                    row.querySelector('.pm-monto-bs').value = totalToDistribute.toFixed(2);
+                    totalToDistribute = 0;
+                } else {
+                    row.querySelector('.pm-monto-bs').value = "0.00";
+                }
+                pmRecalcRowUsdAmount(row);
+            });
         };
 
         const pmRecalcTotals = () => {
@@ -4265,6 +4287,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('pmMontoTotalReal')?.addEventListener('input', (e) => {
             e.target.dataset.manualEdit = "true";
+            pmDistributePartialPayment();
             pmRecalcTotals();
         });
 
