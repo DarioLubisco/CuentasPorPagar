@@ -50,7 +50,7 @@ try:
 
     # 3. Search for other potential discrepancies (Mismatches between Portal and Saint)
     print("\n--- [BÚSQUEDA DE OTRAS INCONGRUENCIAS EN EL SISTEMA] ---")
-    # Facs where Portal sum != Saint MtoPagos (Approx)
+    # Facs where Portal sum != Saint MtoPagos (Approx). We exclude informative discounts for the true sum of cash.
     cursor.execute("""
         SELECT TOP 5
             cxp.NumeroD,
@@ -61,18 +61,19 @@ try:
         OUTER APPLY (
             SELECT SUM(MontoBsAbonado) as TotalBs
             FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos a
-            WHERE a.NumeroD = cxp.NumeroD AND a.CodProv = cxp.CodProv
+            WHERE a.NumeroD = cxp.NumeroD AND a.CodProv = cxp.CodProv 
+            AND a.TipoAbono NOT IN ('DESCUENTO', 'DESCUENTO_BASE')
         ) portal
         WHERE cxp.TipoCxP = '10' 
         AND ABS(ISNULL(comp.MtoPagos,0) - ISNULL(portal.TotalBs,0)) > 1.0
     """)
     mismatches = cursor.fetchall()
     if mismatches:
-        print("Muestra de facturas donde los pagos de Saint NO coinciden con los del Portal:")
+        print("Muestra de facturas donde los pagos EFECTIVOS de Saint NO coinciden con los del Portal:")
         for m in mismatches:
             print(f"Inv: {m[0]} | Saint: {m[1]} | Portal: {m[2]}")
     else:
-        print("No se encontraron discrepancias obvias de cuadre entre Portal y Saint en la muestra.")
+        print("No se encontraron discrepancias obvias de cuadre de efectivo entre Portal y Saint en la muestra.")
 
 except Exception as e:
     print("Error:", e)

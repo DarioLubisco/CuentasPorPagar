@@ -1549,8 +1549,7 @@
                             <th>Días Vencimiento</th>
                             <th>Email N/D</th>
                             <th>Tipo (ISLR)</th>
-                            <th>PP1 % (Días)</th>
-                            <th>PP2 % (Días)</th>
+                            <th>Descuentos PP</th>
                             <th>Indexa IVA</th>
                             <th>Acción</th>
                         </tr>
@@ -1599,7 +1598,7 @@
 
     <!-- Edit Single Provider Modal -->
     <div id="editProviderCondModal" class="modal" style="z-index: 10010;">
-        <div class="modal-content glassmorphism" style="max-width: 500px;">
+        <div class="modal-content glassmorphism" style="max-width: 1060px;">
             <h2 id="editProvTitle">Editar Proveedor</h2>
             <form id="editProvForm" style="margin-top: 1rem;">
                 <input type="hidden" id="editProvCod">
@@ -1624,34 +1623,52 @@
                         <input type="number" id="editProvDiasV" class="form-control" min="0" required>
                     </div>
                 </div>
+
+                <div style="background: rgba(139, 92, 246, 0.05); padding: 1rem; border-radius: var(--radius-sm); border: 1px dashed rgba(139, 92, 246, 0.3); margin-top: 0.5rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <h4 style="margin: 0; color: var(--primary-accent);">Descuento Comercial Base</h4>
+                        <span title="Diferente al Pronto Pago, este descuento cascada se resta ANTES de calcular el pronto pago. Dependiendo de la condición, aplica siempre (Independiente) o solo si pagas a tiempo (Antes de Vencimiento)." style="cursor:help; color:var(--text-secondary); display:inline-flex;"><i data-lucide="info" size="16"></i></span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <div class="input-group" style="margin: 0;">
+                            <label>Descuento Base (%):</label>
+                            <input type="number" id="editProvDescBasePct" class="form-control" min="0" step="0.01" value="0.00">
+                        </div>
+                        <div class="input-group" style="margin: 0;">
+                            <label>Condición:</label>
+                            <select id="editProvDescBaseCond" class="form-control">
+                                <option value="INDEPENDIENTE">Siempre Aplica</option>
+                                <option value="VENCIMIENTO">Solo en Vencimiento o Antes</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="input-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; margin-bottom: 0;">
+                        <input type="checkbox" id="editProvDescBaseDeduceIVA" style="width: auto; margin: 0; cursor: pointer;">
+                        <label for="editProvDescBaseDeduceIVA" style="margin: 0; cursor: pointer; user-select: none;">Deduce IVA <small style="display:inline;color:var(--warning);font-weight:normal;">(Si se destilda, el IVA se calculará "inflado" sin base de descuento)</small></label>
+                    </div>
+                </div>
                 
                 <div class="input-group" style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
                     <input type="checkbox" id="editProvIndexaIVA" style="width: auto; margin: 0; cursor: pointer;" checked>
                     <label for="editProvIndexaIVA" style="margin: 0; cursor: pointer; user-select: none;">Proveedor Indexa IVA <small style="display:block;color:var(--text-secondary);font-weight:normal;">Permite crear facturas donde la base crece por divisa, pero el IVA mantiene su valor histórico en Bs.</small></label>
                 </div>
 
-                <p
-                    style="margin-top: 1rem; margin-bottom: 0.5rem; font-weight: bold; font-size: 0.9rem; color: var(--primary-accent);">
-                    Pronto Pagos</p>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                    <div class="input-group">
-                        <label>PP1 - (%) Dcto:</label>
-                        <input type="number" id="editProvPP1Pct" class="form-control" step="0.01" min="0">
-                    </div>
-                    <div class="input-group">
-                        <label>PP1 - Días Vigencia:</label>
-                        <input type="number" id="editProvPP1Dias" class="form-control" min="0">
-                    </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; margin-bottom: 0.5rem;">
+                    <p style="margin: 0; font-weight: bold; font-size: 0.9rem; color: var(--primary-accent);">
+                        Tramos Pronto Pago</p>
+                    <button type="button" class="btn btn-secondary" id="btnAddDescuento" style="font-size: 0.8rem; padding: 0.2rem 0.5rem;">+ Agregar</button>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 0.5rem;">
-                    <div class="input-group">
-                        <label>PP2 - (%) Dcto:</label>
-                        <input type="number" id="editProvPP2Pct" class="form-control" step="0.01" min="0">
-                    </div>
-                    <div class="input-group">
-                        <label>PP2 - Días Vigencia:</label>
-                        <input type="number" id="editProvPP2Dias" class="form-control" min="0">
-                    </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto auto; gap: 0.5rem; padding: 0 0.5rem 0.2rem 0.5rem; font-size: 0.8rem; color: var(--text-secondary); font-weight: 500;">
+                    <div>Día Inicial</div>
+                    <div>Día Final</div>
+                    <div>Porcentaje (%)</div>
+                    <div style="padding-left: 0.5rem;">¿Afecta IVA?</div>
+                    <div></div>
+                </div>
+                
+                <div id="descuentosContainer" style="display: flex; flex-direction: column; gap: 0.5rem; background: rgba(0,0,0,0.1); padding: 0.5rem; border-radius: var(--radius-sm); max-height: 150px; overflow-y: auto;">
+                    <!-- Inserted via JS -->
                 </div>
 
                 <div class="input-group">
@@ -1777,8 +1794,7 @@
                         <div style="color: var(--warning);">Límite No Indexación:</div>
                         <div id="abFechaNI" style="text-align: right; font-weight: 500; color: var(--warning);">-</div>
 
-                        <div style="color: var(--primary-accent);">Pronto Pago 1:</div>
-                        <div id="abFechaPP1" style="text-align: right; font-weight: 500;">-</div>
+
 
                         <div style="color: var(--danger);">Vencimiento:</div>
                         <div id="abFechaV" style="text-align: right; font-weight: 500; color: var(--danger);">-</div>
@@ -1871,25 +1887,50 @@
                                 style="color: var(--success); font-weight: bold; background: rgba(16, 185, 129, 0.05);">
                         </div>
 
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; align-items: flex-start; margin-top: 0.5rem;">
+                        <div style="display: grid; grid-template-columns: 1fr 1.5fr 1.5fr; gap: 0.75rem; align-items: flex-start; margin-top: 0.5rem; background: rgba(0,0,0,0.15); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid rgba(255,255,255,0.05);">
                             <div style="display: flex; flex-direction: column; gap: 0.35rem;">
                                 <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
                                     <input type="checkbox" id="abAplicaIndex">
-                                    <span>¿Aplicar Indexación?</span>
+                                    <span style="font-weight: 600; font-size: 0.9rem;">Indexación</span>
                                 </label>
-                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-left: 1.5rem; font-size: 0.85rem; color: var(--text-secondary);" title="Controla si el IVA acompaña el alza cambiaria de la Base">
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin-left: 1.5rem; font-size: 0.8rem; color: var(--text-secondary);" title="Controla si el IVA acompaña el alza cambiaria de la Base">
                                     <input type="checkbox" id="abIndexaIVA">
                                     <span>Indexar IVA</span>
                                 </label>
                             </div>
-                            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                                <input type="checkbox" id="abProntoPago">
-                                <span>Pronto Pago</span>
-                            </label>
-                            <div class="input-group">
-                                <select id="abTipoDescuento" class="form-control" style="font-size: 0.85rem;" disabled>
-                                    <option value="0">Descuento 0%</option>
-                                </select>
+                            
+                            <div style="display: flex; flex-direction: column; gap: 0.35rem; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 0.75rem;">
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="checkbox" id="abDescBaseAplica" disabled>
+                                    <span style="font-weight: 600; font-size: 0.9rem; color: var(--primary-accent);">Desc. Base</span>
+                                </label>
+                                <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                    <div class="input-group" style="margin:0;">
+                                        <input type="text" id="abDescBaseInfo" class="form-control" style="font-size: 0.8rem; height: 2rem; padding-left: 0.5rem;" readonly value="0% (Inactivo)">
+                                    </div>
+                                    <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.2rem;">
+                                        <input type="checkbox" id="abDescBaseDeduceIVA" disabled>
+                                        <span>Deduce IVA</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div style="display: flex; flex-direction: column; gap: 0.35rem; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 0.75rem;">
+                                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                                    <input type="checkbox" id="abProntoPago">
+                                    <span style="font-weight: 600; font-size: 0.9rem; color: var(--warning);">Pronto Pago</span>
+                                </label>
+                                <div style="display: flex; flex-direction: column; gap: 0.25rem;">
+                                    <div class="input-group" style="margin:0;">
+                                        <select id="abTipoDescuento" class="form-control" style="font-size: 0.75rem; height: 2rem; padding: 0 0.25rem; text-overflow: ellipsis;" disabled>
+                                            <option value="0" data-deduce-iva="false">0%</option>
+                                        </select>
+                                    </div>
+                                    <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.2rem;">
+                                        <input type="checkbox" id="abPPDeduceIVA" disabled>
+                                        <span>Deduce IVA</span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
@@ -2210,7 +2251,12 @@
                     <strong id="dynMtoTotalUsd" style="color: var(--success);">$ 0.00</strong>
                 </div>
 
-                <div id="dynDescuentoBox" style="display: none; justify-content: space-between; margin-bottom: 0.75rem; border-top: 1px dotted rgba(255,255,255,0.1); padding-top: 0.5rem;">
+                <div id="dynDescBaseBox" style="display: none; justify-content: space-between; margin-bottom: 0.25rem;">
+                    <span style="color: var(--warning);">Descuento Base (<span id="dynPctDescBase">0</span>%):</span>
+                    <strong id="dynMontoDescBaseUsd" style="color: var(--warning);">-$ 0.00</strong>
+                </div>
+
+                <div id="dynDescuentoBox" style="display: none; justify-content: space-between; margin-bottom: 0.75rem;">
                     <span style="color: var(--warning);">Descuento PP (<span id="dynPctDesc">0</span>%):</span>
                     <strong id="dynMontoDescUsd" style="color: var(--warning);">-$ 0.00</strong>
                 </div>
@@ -2693,11 +2739,10 @@
 
     <datalist id="datalistProviders"></datalist>
 
-    <script src="script.js?v=49.2"></script>
-    <script src="modules-report.js?v=49.2"></script>
+    <script src="script.js?v=49.67"></script>
+    <script src="modules-report.js?v=49.63"></script>
     <script>
         lucide.createIcons();
     </script>
 </body>
-
 </html>

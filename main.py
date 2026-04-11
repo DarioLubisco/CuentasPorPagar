@@ -92,16 +92,22 @@ class BatchExpenseRequest(BaseModel):
     descripcionesAEliminar: Optional[List[str]] = None
 
 # --- Modelos Módulo Pagos e Indexación ---
+class ProveedorDescuento(BaseModel):
+    DiasDesde: int
+    DiasHasta: int
+    Porcentaje: float
+    DeduceIVA: Optional[bool] = False
+
 class ProveedorCondicion(BaseModel):
     CodProv: str
     DiasNoIndexacion: Optional[int] = 0
     IndexaIVA: Optional[bool] = True
     BaseDiasCredito: Optional[str] = "EMISION"
     DiasVencimiento: Optional[int] = 0
-    ProntoPago1_Dias: Optional[int] = 0
-    ProntoPago1_Pct: Optional[float] = 0.0
-    ProntoPago2_Dias: Optional[int] = 0
-    ProntoPago2_Pct: Optional[float] = 0.0
+    Descuentos: Optional[List[ProveedorDescuento]] = []
+    DescuentoBase_Pct: Optional[float] = 0.0
+    DescuentoBase_Condicion: Optional[str] = "INDEPENDIENTE"
+    DescuentoBase_DeduceIVA: Optional[bool] = False
     Email: Optional[str] = None
     TipoPersona: Optional[str] = None
     DecimalesTasa: Optional[int] = 4  # 'PJ' = Juridica, 'PN' = Natural, None = auto
@@ -465,12 +471,11 @@ async def get_provider_conditions():
                    ISNULL(c.DiasNoIndexacion, 0) AS DiasNoIndexacion, 
                    ISNULL(c.BaseDiasCredito, 'EMISION') AS BaseDiasCredito, 
                    ISNULL(c.DiasVencimiento, p.DiasCred) AS DiasVencimiento,
-                   ISNULL(c.ProntoPago1_Dias, 0) AS ProntoPago1_Dias, 
-                   ISNULL(c.ProntoPago1_Pct, 0) AS ProntoPago1_Pct,
-                   ISNULL(c.ProntoPago2_Dias, 0) AS ProntoPago2_Dias, 
-                   ISNULL(c.ProntoPago2_Pct, 0) AS ProntoPago2_Pct,
                    ISNULL(c.IndexaIVA, 1) AS IndexaIVA,
                    ISNULL(c.DecimalesTasa, 4) AS DecimalesTasa,
+                   ISNULL(c.DescuentoBase_Pct, 0) AS DescuentoBase_Pct,
+                   ISNULL(c.DescuentoBase_Condicion, 'INDEPENDIENTE') AS DescuentoBase_Condicion,
+                   ISNULL(c.DescuentoBase_DeduceIVA, 0) AS DescuentoBase_DeduceIVA,
                    COALESCE(c.Email, p.Email, '') AS Email,
                    -- TipoPersona: LOCAL overrides SAINT derivation
                    COALESCE(
@@ -489,10 +494,23 @@ async def get_provider_conditions():
         columns = [column[0] for column in cursor.description]
         results = [dict(zip(columns, row)) for row in cursor.fetchall()]
         
-        # Convert Decimals to float for JSON serialization
+        # Fetch dynamic discounts
+        cursor.execute("SELECT CodProv, DiasDesde, DiasHasta, Porcentaje, DeduceIVA FROM EnterpriseAdmin_AMC.Procurement.ProveedorDescuentosProntoPago WITH (NOLOCK)")
+        desc_cols = [c[0] for c in cursor.description]
+        descuentos_db = [dict(zip(desc_cols, row)) for row in cursor.fetchall()]
+        
+        desc_map = {}
+        for d in descuentos_db:
+            desc_map.setdefault(d['CodProv'], []).append({
+                "DiasDesde": int(d['DiasDesde']),
+                "DiasHasta": int(d['DiasHasta']),
+                "Porcentaje": float(d['Porcentaje']),
+                "DeduceIVA": bool(d.get('DeduceIVA', False))
+            })
+            
         for r in results:
-            r['ProntoPago1_Pct'] = float(r['ProntoPago1_Pct'])
-            r['ProntoPago2_Pct'] = float(r['ProntoPago2_Pct'])
+            r['Descuentos'] = desc_map.get(r['CodProv'], [])
+
             
         return {"data": results}
     except Exception as e:
@@ -518,30 +536,36 @@ async def update_provider_condition(cod_prov: str, payload: ProveedorCondicion):
             update_query = """
                 UPDATE EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones
                 SET DiasNoIndexacion = ?, BaseDiasCredito = ?, DiasVencimiento = ?,
-                    ProntoPago1_Dias = ?, ProntoPago1_Pct = ?,
-                    ProntoPago2_Dias = ?, ProntoPago2_Pct = ?,
-                    Email = ?, TipoPersona = ?, IndexaIVA = ?, DecimalesTasa = ?
+                    Email = ?, TipoPersona = ?, IndexaIVA = ?, DecimalesTasa = ?,
+                    DescuentoBase_Pct = ?, DescuentoBase_Condicion = ?, DescuentoBase_DeduceIVA = ?
                 WHERE CodProv = ?
             """
             cursor.execute(update_query, (
                 payload.DiasNoIndexacion, payload.BaseDiasCredito, payload.DiasVencimiento,
-                payload.ProntoPago1_Dias, payload.ProntoPago1_Pct,
-                payload.ProntoPago2_Dias, payload.ProntoPago2_Pct,
                 payload.Email, tipo_pers, payload.IndexaIVA, payload.DecimalesTasa,
+                payload.DescuentoBase_Pct, payload.DescuentoBase_Condicion, payload.DescuentoBase_DeduceIVA,
                 cod_prov
             ))
         else:
             insert_query = """
                 INSERT INTO EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones 
-                (CodProv, DiasNoIndexacion, BaseDiasCredito, DiasVencimiento, ProntoPago1_Dias, ProntoPago1_Pct, ProntoPago2_Dias, ProntoPago2_Pct, Email, TipoPersona, IndexaIVA, DecimalesTasa)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (CodProv, DiasNoIndexacion, BaseDiasCredito, DiasVencimiento, Email, TipoPersona, IndexaIVA, DecimalesTasa, DescuentoBase_Pct, DescuentoBase_Condicion, DescuentoBase_DeduceIVA)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             cursor.execute(insert_query, (
                 cod_prov, payload.DiasNoIndexacion, payload.BaseDiasCredito, payload.DiasVencimiento,
-                payload.ProntoPago1_Dias, payload.ProntoPago1_Pct,
-                payload.ProntoPago2_Dias, payload.ProntoPago2_Pct,
-                payload.Email, tipo_pers, payload.IndexaIVA, payload.DecimalesTasa
+                payload.Email, tipo_pers, payload.IndexaIVA, payload.DecimalesTasa, payload.DescuentoBase_Pct, payload.DescuentoBase_Condicion, payload.DescuentoBase_DeduceIVA
             ))
+            
+        # Update dynamic discounts
+        cursor.execute("DELETE FROM EnterpriseAdmin_AMC.Procurement.ProveedorDescuentosProntoPago WHERE CodProv = ?", (cod_prov,))
+        if payload.Descuentos:
+            for desc in payload.Descuentos:
+                cursor.execute(
+                    "INSERT INTO EnterpriseAdmin_AMC.Procurement.ProveedorDescuentosProntoPago (CodProv, DiasDesde, DiasHasta, Porcentaje, DeduceIVA) VALUES (?, ?, ?, ?, ?)",
+                    (cod_prov, desc.DiasDesde, desc.DiasHasta, desc.Porcentaje, desc.DeduceIVA)
+                )
+
             
         # Synchronize SAPROV native credit days
         update_saprov = "UPDATE EnterpriseAdmin_AMC.dbo.SAPROV SET DiasCred = ? WHERE CodProv = ?"
@@ -1099,10 +1123,11 @@ async def registrar_abono(
     MontoAjusteBs: Optional[float] = Form(None),
     MotivoAjusteID: Optional[int] = Form(None),
     MontoDescuentoBs: Optional[float] = Form(None),
-    MotivoDescuentoID: Optional[int] = Form(None)
+    MotivoDescuentoID: Optional[int] = Form(None),
+    MontoDescuentoBaseBs: Optional[float] = Form(None)
 ):
     try:
-        logging.info(f"REGISTRAR ABONO CALLED - NumeroD: {NumeroD}, MontoBs: {MontoBsAbonado}, MontoAjusteBs: {MontoAjusteBs}, MotivoAjusteID: {MotivoAjusteID}")
+        logging.info(f"REGISTRAR ABONO CALLED - NumeroD: {NumeroD}, MontoBs: {MontoBsAbonado}, MontoAjusteBs: {MontoAjusteBs}, MontoDescuentoBaseBs: {MontoDescuentoBaseBs}")
         conn = database.get_db_connection()
         cursor = conn.cursor()
 
@@ -1156,6 +1181,21 @@ async def registrar_abono(
                 MontoDescuentoBs, TasaCambioDiaAbono,
                 MontoDescuentoBs / TasaCambioDiaAbono if TasaCambioDiaAbono > 0 else 0,
                 aplica_idx, tasa_orig, mto_orig, desc_motivo_id
+            ))
+            
+        if MontoDescuentoBaseBs and MontoDescuentoBaseBs > 0:
+            cursor.execute("SELECT ISNULL(MAX(AbonoID), 0) FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos")
+            max_desc_base_id = int(cursor.fetchone()[0]) + 1
+            cursor.execute("""
+                INSERT INTO EnterpriseAdmin_AMC.dbo.CxP_Abonos 
+                (AbonoID, NumeroD, CodProv, FechaAbono, MontoBsAbonado, TasaCambioDiaAbono, MontoUsdAbonado,
+                 AplicaIndexacion, Referencia, RutaComprobante, NotificarCorreo, TasaCambioOrig, MontoMExOrig, TipoAbono, MotivoAjusteID, AfectaSaldo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'DESCUENTO COMERCIAL BASE', NULL, 0, ?, ?, 'DESCUENTO_BASE', NULL, 0)
+            """, (
+                max_desc_base_id, NumeroD, CodProv, FechaAbono,
+                MontoDescuentoBaseBs, TasaCambioDiaAbono,
+                MontoDescuentoBaseBs / TasaCambioDiaAbono if TasaCambioDiaAbono > 0 else 0,
+                aplica_idx, tasa_orig, mto_orig
             ))
         
         if MontoAjusteBs and MontoAjusteBs > 0:
@@ -1617,11 +1657,10 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...),
                 ISNULL(cond.IndexaIVA, 1) AS IndexaIVA,
                 ISNULL(cond.BaseDiasCredito, 'EMISION') AS BaseDiasCredito,
                 ISNULL(cond.DiasVencimiento, prov.diascred) AS DiasVencimiento,
-                ISNULL(cond.ProntoPago1_Dias, 0) AS ProntoPago1_Dias,
-                ISNULL(cond.ProntoPago1_Pct, 0) AS ProntoPago1_Pct,
-                ISNULL(cond.ProntoPago2_Dias, 0) AS ProntoPago2_Dias,
-                ISNULL(cond.ProntoPago2_Pct, 0) AS ProntoPago2_Pct,
                 ISNULL(cond.DecimalesTasa, 4) AS DecimalesTasa,
+                ISNULL(cond.DescuentoBase_Pct, 0) AS DescuentoBase_Pct,
+                ISNULL(cond.DescuentoBase_Condicion, 'INDEPENDIENTE') AS DescuentoBase_Condicion,
+                ISNULL(cond.DescuentoBase_DeduceIVA, 0) AS DescuentoBase_DeduceIVA,
                 prov.Descrip AS ProveedorNombre,
                 prov.NumeroUP, prov.FechaUP, prov.MontoUP,
                 dt_emision.dolarbcv AS TasaEmisionCalculada,
@@ -1706,13 +1745,9 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...),
             fecha_ni = base_date + timedelta(days=int(data['DiasNoIndexacion']))
             
         fecha_v = base_date + timedelta(days=int(data['DiasVencimiento']))
-        fecha_pp1 = base_date + timedelta(days=int(data['ProntoPago1_Dias']))
-        fecha_pp2 = base_date + timedelta(days=int(data['ProntoPago2_Dias']))
         
         data['FechaNI_Calculada'] = fecha_ni.strftime('%Y-%m-%d')
         data['FechaV_Calculada'] = fecha_v.strftime('%Y-%m-%d')
-        data['FechaPP1'] = fecha_pp1.strftime('%Y-%m-%d')
-        data['FechaPP2'] = fecha_pp2.strftime('%Y-%m-%d')
         
         # Convert numeric types to float for JSON
         for k, v in data.items():
@@ -1761,6 +1796,11 @@ async def get_cxp_status(cod_prov: str = Query(...), numero_d: str = Query(...),
                     record[k] = v.strftime('%Y-%m-%d')
                     
         data['HistorialAbonos'] = history_data
+
+        # Fetch dynamic discounts
+        cursor.execute("SELECT DiasDesde, DiasHasta, Porcentaje, DeduceIVA FROM EnterpriseAdmin_AMC.Procurement.ProveedorDescuentosProntoPago WITH (NOLOCK) WHERE CodProv = ? ORDER BY DiasDesde ASC", (cod_prov,))
+        desc_cols = [c[0] for c in cursor.description]
+        data['Descuentos'] = [dict(zip(desc_cols, row)) for row in cursor.fetchall()]
 
         return {"data": data}
         
@@ -2525,15 +2565,13 @@ async def run_antigravity_optimizer(payload: AntigravityRequest):
         # 1. Fetch Invoices
         inv_query = """
             SELECT 
-                SAACXP.NroUnico, SAPROV.CodProv, SAPROV.Descrip,
+                SAACXP.NroUnico, SAACXP.NumeroD, SAPROV.CodProv, SAPROV.Descrip,
                 SAACXP.Saldo, SAACXP.FechaE, SAACXP.FechaV,
                 ISNULL(dt_emision.dolarbcv, 1) AS tc_emision,
                 ISNULL(PC.DiasNoIndexacion, 15) AS t_tolerance,
                 ISNULL(PC.DiasVencimiento, 30) AS t_due,
-                ISNULL(PC.ProntoPago1_Dias, 0) AS t_d1,
-                ISNULL(PC.ProntoPago1_Pct, 0) / 100.0 AS d1_pct,
-                ISNULL(PC.ProntoPago2_Dias, 0) AS t_d2,
-                ISNULL(PC.ProntoPago2_Pct, 0) / 100.0 AS d2_pct
+                ISNULL(PC.DescuentoBase_Pct, 0) / 100.0 AS desc_base_pct,
+                ISNULL(PC.DescuentoBase_Condicion, 'INDEPENDIENTE') AS desc_base_cond
             FROM dbo.SAACXP WITH (NOLOCK)
             LEFT JOIN dbo.SAPROV WITH (NOLOCK) ON SAACXP.CodProv = SAPROV.CodProv
             LEFT JOIN EnterpriseAdmin_AMC.Procurement.ProveedorCondiciones PC WITH (NOLOCK) ON SAPROV.CodProv = PC.CodProv
@@ -2549,6 +2587,19 @@ async def run_antigravity_optimizer(payload: AntigravityRequest):
         columns = [column[0] for column in cursor.description]
         db_invoices = [dict(zip(columns, row)) for row in cursor.fetchall()]
         
+        # Fetch dynamic discounts
+        cursor.execute("SELECT CodProv, DiasDesde, DiasHasta, Porcentaje FROM EnterpriseAdmin_AMC.Procurement.ProveedorDescuentosProntoPago WITH (NOLOCK)")
+        desc_cols = [c[0] for c in cursor.description]
+        descuentos_db = [dict(zip(desc_cols, row)) for row in cursor.fetchall()]
+        desc_map = {}
+        for d in descuentos_db:
+            desc_map.setdefault(d['CodProv'], []).append({
+                "DiasDesde": int(d['DiasDesde']),
+                "DiasHasta": int(d['DiasHasta']),
+                # Convert to proportion
+                "Porcentaje": float(d['Porcentaje']) / 100.0 
+            })
+            
         from datetime import date, timedelta
         today_date = date.today()
         
@@ -2573,17 +2624,16 @@ async def run_antigravity_optimizer(payload: AntigravityRequest):
             calc_t_due = max(0, (fecha_v - fecha_e).days)
             
             invoices_payload.append({
-                "id": str(row["NroUnico"]),
+                "id": str(row["NumeroD"]),
                 "supplier": row["Descrip"],
                 "nominal_bs": float(row["Saldo"]),
                 "tc_emision": float(row["tc_emision"]),
                 "days_elapsed_since_emission": elapsed,
                 "t_tolerance": int(row["t_tolerance"]),
                 "t_due": calc_t_due,
-                "t_d1": int(row["t_d1"]),
-                "d1_pct": float(row["d1_pct"]),
-                "t_d2": int(row["t_d2"]),
-                "d2_pct": float(row["d2_pct"]),
+                "desc_base_pct": float(row["desc_base_pct"]),
+                "desc_base_cond": row["desc_base_cond"],
+                "descuentos": desc_map.get(row["CodProv"], []),
                 "priority": "Media" 
             })
             
@@ -3106,9 +3156,9 @@ async def crear_retencion(payload: dict = Body(...)):
             new_id = cursor.fetchone()[0]
             inserted_ids.append(new_id)
             
-            # Auto-register as abono in CxP_Abonos with TipoAbono='RETENCION_IVA'
+            # Auto-register as abono in CxP_Abonos with TipoAbono='RETENCION_IVA' (even if 0)
             monto_retenido = float(f.get("MontoRetenido", 0))
-            if monto_retenido > 0:
+            if True:
                 # Phase 8: Lookup mirror fields for independence
                 cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND CodProv = ? AND TipoCom = 'H'", (f['NumeroD'], f['CodProv']))
                 sacomp_row = cursor.fetchone()
@@ -4084,7 +4134,7 @@ async def crear_retencion_islr(payload: dict = Body(...)):
 
             monto_retenido = float(f.get("MontoRetenido", 0))
 
-            if monto_retenido > 0:
+            if True:
                 # Get historical exchange rate to record the abono correctly
                 cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND CodProv = ? AND TipoCom = 'H'", (f["NumeroD"], f["CodProv"]))
                 sacomp_row = cursor.fetchone()

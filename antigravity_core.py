@@ -48,12 +48,21 @@ class AntigravityEngine:
         # t_pay is from TODAY. We need days from EMISSION.
         days_from_emission = invoice["days_elapsed_since_emission"] + t_pay
         
-        if days_from_emission <= invoice["t_d1"]:
-            discount = invoice["d1_pct"]
-        elif days_from_emission <= invoice["t_d2"]:
-            discount = invoice["d2_pct"]
+        for d in invoice.get("descuentos", []):
+            if d["DiasDesde"] <= days_from_emission <= d["DiasHasta"]:
+                discount = d["Porcentaje"]
+                break
+                
+        # Base Commercial Discount
+        desc_base = 0.0
+        if invoice.get("desc_base_cond") == "VENCIMIENTO":
+            if days_from_emission <= invoice["t_due"]:
+                desc_base = invoice.get("desc_base_pct", 0.0)
+        else:
+            # Independent
+            desc_base = invoice.get("desc_base_pct", 0.0)
             
-        amount_bs = P * (1 - discount)
+        amount_bs = P * (1.0 - desc_base) * (1.0 - discount)
         tc_pay_future = self.project_tc(t_pay, r_dev, current_tc)
         
         # Check indexation tolerance

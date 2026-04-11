@@ -318,7 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return roundFixed(ret);
     };
 
-    const calculateInvoiceFinancials = (cxp, { tasaDia, aplicaIndex, aplicaIndexIva, pctDesc, islrRate }) => {
+    const calculateInvoiceFinancials = (cxp, { tasaDia, aplicaIndex, aplicaIndexIva, pctDesc, descBasePct, islrRate, deduceIvaBase = true, deduceIvaPP = true }) => {
         const historicalTasa = (cxp.Factor && cxp.Factor > 0 && (window.globalRetConfig?.TasaEmisionSource === 'SACOMP' || window.globalRetConfig?.TasaEmisionSource === 'SACOMP_FACTOR')) 
             ? parseFloat(cxp.Factor) 
             : parseFloat(cxp.TasaEmision) || 1;
@@ -338,12 +338,26 @@ document.addEventListener('DOMContentLoaded', () => {
             baseBs   = roundFixed(parseFloat(cxp.TGravable) || 0);
             exentoBs = roundFixed(exentoOrigBs);
         }
+        
+        let baseBsLegalParaIva = baseBs;
+        let exentoBsLegalParaIva = exentoBs;
 
-        const pct = parseFloat(pctDesc) || 0;
-        if (pct > 0) {
-            const fDescuento = (1 - (pct / 100.0));
+        const pctPP = parseFloat(pctDesc) || 0;
+        const pctBase = parseFloat(descBasePct) || 0;
+        let fDescuento = 1.0;
+        let fDescuentoIva = 1.0;
+        
+        if (pctPP > 0 || pctBase > 0) {
+            fDescuento = (1.0 - (pctBase / 100.0)) * (1.0 - (pctPP / 100.0));
             baseBs   = roundFixed(baseBs * fDescuento);
             exentoBs = roundFixed(exentoBs * fDescuento);
+            
+            const factIvaBase = (deduceIvaBase !== false) ? (1.0 - (pctBase / 100.0)) : 1.0;
+            const factIvaPP = (deduceIvaPP !== false) ? (1.0 - (pctPP / 100.0)) : 1.0;
+            fDescuentoIva = factIvaBase * factIvaPP;
+            
+            baseBsLegalParaIva = roundFixed(baseBsLegalParaIva * fDescuentoIva);
+            exentoBsLegalParaIva = roundFixed(exentoBsLegalParaIva * fDescuentoIva);
         }
 
         // --- Granular IVA Indexation Logic ---
@@ -351,12 +365,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const indexaIVA = aplicaIndexIva !== undefined ? aplicaIndexIva : (cxp.IndexaIVA ?? true);
         
         if (indexaIVA && aplicaIndex) {
-            ivaBs = roundFixed(baseBs * 0.16); 
+            ivaBs = roundFixed(baseBsLegalParaIva * 0.16); 
         } else {
             // Keep historical IVA value, but respect discounts if applied
             let historicalIva = parseFloat(cxp.MtoTax) || 0;
-            if (pct > 0) {
-                historicalIva = roundFixed(historicalIva * (1 - (pct / 100.0)));
+            if (fDescuentoIva < 1.0) {
+                historicalIva = roundFixed(historicalIva * fDescuentoIva);
             }
             ivaBs = historicalIva;
         }
@@ -377,11 +391,11 @@ document.addEventListener('DOMContentLoaded', () => {
         
         let retenIslrBs = 0;
         if (ret_islr_abonada === 0) {
-            retenIslrBs = calcISLR((baseBs + exentoBs), (parseFloat(islrRate) || 0), cxp.CodProv, cxp.TipoPersona);
+            retenIslrBs = calcISLR((baseBsLegalParaIva + exentoBsLegalParaIva), (parseFloat(islrRate) || 0), cxp.CodProv, cxp.TipoPersona);
         }
 
         let mtoTotalUsd = 0;
-        if (pct === 0 && (window.globalRetConfig?.MontoUsdSource === 'SACOMP' || window.globalRetConfig?.MontoUsdSource === 'SACOMP_MONOMEX') && cxp.MontoMEx > 0) {
+        if (pctPP === 0 && pctBase === 0 && (window.globalRetConfig?.MontoUsdSource === 'SACOMP' || window.globalRetConfig?.MontoUsdSource === 'SACOMP_MONOMEX') && cxp.MontoMEx > 0) {
             mtoTotalUsd = parseFloat(cxp.MontoMEx);
         } else {
             mtoTotalUsd = roundUSD(newMtoBs / (currentTasa > 0 ? currentTasa : 1));
@@ -435,8 +449,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const equivUsd = currentTasa > 0 ? (finalBs / currentTasa) : 0;
             
         let descUsdMonto = 0;
-        if(pct > 0) {
-           descUsdMonto = roundUSD(mtoTotalUsd * (pct / 100.0));
+        if(fDescuento < 1.0) {
+           descUsdMonto = roundUSD(mtoTotalUsd * (1.0 - fDescuento));
         }
 
         const origTotalUsd = (cxp.MontoMEx > 0) ? parseFloat(cxp.MontoMEx) : ((parseFloat(cxp.Monto) || 0) / historicalTasa);
@@ -2500,8 +2514,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${p.DiasVencimiento}</td>
                 <td>${p.Email || '-'}</td>
                 <td><span class="status-badge" style="background:var(--bg-secondary);">${p.TipoPersona || 'Auto'}</span></td>
-                <td>${p.ProntoPago1_Pct}% (${p.ProntoPago1_Dias}d)</td>
-                <td>${p.ProntoPago2_Pct}% (${p.ProntoPago2_Dias}d)</td>
+                <td>${p.Descuentos ? p.Descuentos.length : 0} tramos</td>
                 <td>${p.IndexaIVA !== false ? '<span style="color:var(--success);">Sí</span>' : '<span style="color:var(--danger);">No</span>'}</td>
                 <td>
                     <button class="btn-icon" title="Editar Condiciones" onclick="openEditProvider('${p.CodProv}')">
@@ -2528,31 +2541,89 @@ document.addEventListener('DOMContentLoaded', () => {
         if(document.getElementById('editProvDecimales')) {
             document.getElementById('editProvDecimales').value = p.DecimalesTasa || 4;
         }
-        document.getElementById('editProvPP1Pct').value = p.ProntoPago1_Pct;
-        document.getElementById('editProvPP1Dias').value = p.ProntoPago1_Dias;
-        document.getElementById('editProvPP2Pct').value = p.ProntoPago2_Pct;
-        document.getElementById('editProvPP2Dias').value = p.ProntoPago2_Dias;
+        
+        if(document.getElementById('editProvDescBasePct')) {
+            document.getElementById('editProvDescBasePct').value = (p.DescuentoBase_Pct || 0).toFixed(2);
+        }
+        if(document.getElementById('editProvDescBaseCond')) {
+            document.getElementById('editProvDescBaseCond').value = p.DescuentoBase_Condicion || 'INDEPENDIENTE';
+        }
+        if (document.getElementById('editProvDescBaseDeduceIVA')) {
+            document.getElementById('editProvDescBaseDeduceIVA').checked = (p.DescuentoBase_DeduceIVA !== false && p.DescuentoBase_DeduceIVA !== 0);
+        }
+
         document.getElementById('editProvEmail').value = p.Email || '';
-        // TipoPersona: show local override ('' = auto from Saint)
         const tpSel = document.getElementById('editProvTipoPersona');
         if (tpSel) tpSel.value = (p.TipoPersonaLocal || '').trim();
+        
+        const container = document.getElementById('descuentosContainer');
+        container.innerHTML = '';
+        if (p.Descuentos && p.Descuentos.length > 0) {
+            p.Descuentos.forEach(d => addDescuentoRow(d.DiasDesde, d.DiasHasta, d.Porcentaje, d.DeduceIVA));
+        } else {
+            // Optional: fallback empty row
+        }
 
         editProviderCondModal.classList.add('active');
     };
+
+    function addDescuentoRow(dDesde = '', dHasta = '', pct = '', deduceIVA = false) {
+        const container = document.getElementById('descuentosContainer');
+        const row = document.createElement('div');
+        row.style.display = 'grid';
+        row.style.gridTemplateColumns = '1fr 1fr 1fr auto auto';
+        row.style.gap = '0.5rem';
+        row.style.alignItems = 'center';
+        row.className = 'descuento-row';
+        row.innerHTML = `
+            <input type="number" class="form-control desc-desde" placeholder="Días Desde" value="${dDesde}" min="0" required title="Días desde emisión de factura">
+            <input type="number" class="form-control desc-hasta" placeholder="Días Hasta" value="${dHasta}" min="0" required title="Use 999 para indicar 'hasta vencimiento'">
+            <input type="number" class="form-control desc-pct" placeholder="% Dcto" value="${pct}" step="0.01" min="0" required>
+            <div style="display:flex; align-items:center; gap:0.25rem;">
+                <input type="checkbox" class="desc-deduce-iva" title="¿Deduce IVA?" ${deduceIVA !== false && deduceIVA !== 0 ? 'checked' : ''} style="cursor:pointer; width:1.2rem; height:1.2rem;">
+            </div>
+            <button type="button" class="btn-icon" style="color:var(--danger);" onclick="this.parentElement.remove()"><i data-lucide="trash-2" size="16"></i></button>
+        `;
+        container.appendChild(row);
+        lucide.createIcons();
+    }
+
+    const btnAddDescuento = document.getElementById('btnAddDescuento');
+    if (btnAddDescuento) {
+        btnAddDescuento.addEventListener('click', () => {
+            const container = document.getElementById('descuentosContainer');
+            const rows = container.querySelectorAll('.descuento-row');
+            let nextDesde = 0;
+            if (rows.length > 0) {
+                const lastHasta = parseInt(rows[rows.length - 1].querySelector('.desc-hasta').value);
+                if (!isNaN(lastHasta) && lastHasta < 999) nextDesde = lastHasta + 1;
+            }
+            addDescuentoRow(nextDesde, '', '');
+        });
+    }
 
     if (editProvForm) {
         editProvForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const codProv = document.getElementById('editProvCod').value;
+            
+            const descRows = document.querySelectorAll('.descuento-row');
+            const Descuentos = Array.from(descRows).map(row => ({
+                DiasDesde: parseInt(row.querySelector('.desc-desde').value) || 0,
+                DiasHasta: parseInt(row.querySelector('.desc-hasta').value) || 0,
+                Porcentaje: parseFloat(row.querySelector('.desc-pct').value) || 0,
+                DeduceIVA: row.querySelector('.desc-deduce-iva')?.checked ?? false
+            }));
+
             const payload = {
                 CodProv: codProv,
                 BaseDiasCredito: document.getElementById('editProvBase').value,
                 DiasNoIndexacion: parseInt(document.getElementById('editProvDiasNI').value) || 0,
                 DiasVencimiento: parseInt(document.getElementById('editProvDiasV').value) || 0,
-                ProntoPago1_Pct: parseFloat(document.getElementById('editProvPP1Pct').value) || 0,
-                ProntoPago1_Dias: parseInt(document.getElementById('editProvPP1Dias').value) || 0,
-                ProntoPago2_Pct: parseFloat(document.getElementById('editProvPP2Pct').value) || 0,
-                ProntoPago2_Dias: parseInt(document.getElementById('editProvPP2Dias').value) || 0,
+                Descuentos: Descuentos,
+                DescuentoBase_Pct: parseFloat(document.getElementById('editProvDescBasePct')?.value) || 0,
+                DescuentoBase_Condicion: document.getElementById('editProvDescBaseCond')?.value || 'INDEPENDIENTE',
+                DescuentoBase_DeduceIVA: document.getElementById('editProvDescBaseDeduceIVA')?.checked ?? false,
                 Email: document.getElementById('editProvEmail').value || null,
                 IndexaIVA: document.getElementById('editProvIndexaIVA')?.checked ?? true,
                 DecimalesTasa: parseInt(document.getElementById('editProvDecimales')?.value) || 4,
@@ -2614,7 +2685,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const abMontoOrigUsd = document.getElementById('abMontoOrigUsd');
     const abFechaBase = document.getElementById('abFechaBase');
     const abFechaNI = document.getElementById('abFechaNI');
-    const abFechaPP1 = document.getElementById('abFechaPP1');
     const abFechaV = document.getElementById('abFechaV');
     const abSaldoUsd = document.getElementById('abSaldoUsd');
     const abonosHistoryBody = document.getElementById('abonosHistoryBody');
@@ -2681,7 +2751,6 @@ document.addEventListener('DOMContentLoaded', () => {
         abMontoOrigUsd.textContent = '...';
         abFechaBase.textContent = '...';
         abFechaNI.textContent = '...';
-        abFechaPP1.textContent = '...';
         abFechaV.textContent = '...';
         abSaldoUsd.textContent = '...';
         const abBI = document.getElementById('abBaseImponible');
@@ -2747,6 +2816,7 @@ document.addEventListener('DOMContentLoaded', () => {
             currentCxpStatus = json.data;
             window._globalCxpStatus = currentCxpStatus;
             renderCxpStatus();
+            checkIndexationStatus();
             // Restore previously saved ISLR concept for this invoice
             const savedIslr = localStorage.getItem(`islr_${numeroD}`);
             const islrSel = document.getElementById('abConceptoISLR');
@@ -2789,7 +2859,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const baseDate = d.BaseDiasCredito === 'EMISION' ? d.FechaE : (d.FechaI || d.FechaE);
         abFechaBase.textContent = formatDate(baseDate);
         abFechaNI.textContent = formatDate(d.FechaNI_Calculada);
-        abFechaPP1.textContent = formatDate(d.FechaPP1);
         // Use the official expiration date from SAACXP instead of the calculated one
         abFechaV.textContent = formatDate(d.FechaVSaint || d.FechaV_Calculada);
 
@@ -2797,16 +2866,61 @@ document.addEventListener('DOMContentLoaded', () => {
         abSaldoUsd.textContent = '...';
 
         const abTipoDescuento = document.getElementById('abTipoDescuento');
+        const abProntoPago = document.getElementById('abProntoPago');
+        const abPPDeduceIVA = document.getElementById('abPPDeduceIVA');
+
+        // Render Descuento Comercial Base info
+        const abDescBaseAplica = document.getElementById('abDescBaseAplica');
+        const abDescBaseInfo = document.getElementById('abDescBaseInfo');
+        const abDescBaseDeduceIVA = document.getElementById('abDescBaseDeduceIVA');
+        if (abDescBaseAplica && abDescBaseInfo) {
+            const descBasePct = parseFloat(d.DescuentoBase_Pct) || 0;
+            if (descBasePct > 0) {
+                abDescBaseAplica.checked = true;
+                abDescBaseInfo.value = `${descBasePct.toFixed(2)}% (${d.DescuentoBase_Condicion === 'VENCIMIENTO' ? 'A Tiempo' : 'Siempre'})`;
+                if (abDescBaseDeduceIVA) {
+                    abDescBaseDeduceIVA.disabled = false;
+                    abDescBaseDeduceIVA.checked = (d.DescuentoBase_DeduceIVA !== false && d.DescuentoBase_DeduceIVA !== 0);
+                }
+            } else {
+                abDescBaseAplica.checked = false;
+                abDescBaseInfo.value = '0% (Inactivo)';
+                if (abDescBaseDeduceIVA) {
+                    abDescBaseDeduceIVA.disabled = true;
+                    abDescBaseDeduceIVA.checked = false;
+                }
+            }
+        }
+
         if (abTipoDescuento) {
             abTipoDescuento.innerHTML = '';
-            let optionsHtml = '<option value="0">Descuento 0%</option>';
-            if (d.ProntoPago1_Pct > 0) {
-                optionsHtml += `<option value="${d.ProntoPago1_Pct}">PP1: ${parseFloat(d.ProntoPago1_Pct).toFixed(2)}%</option>`;
-            }
-            if (d.ProntoPago2_Pct > 0) {
-                optionsHtml += `<option value="${d.ProntoPago2_Pct}">PP2: ${parseFloat(d.ProntoPago2_Pct).toFixed(2)}%</option>`;
+            let optionsHtml = '<option value="0" data-deduce-iva="false">Descuento 0%</option>';
+            if (d.Descuentos && d.Descuentos.length > 0) {
+                d.Descuentos.forEach((desc, i) => {
+                    optionsHtml += `<option value="${desc.Porcentaje}" data-deduce-iva="${desc.DeduceIVA ? 'true' : 'false'}">T${i+1}: ${parseFloat(desc.Porcentaje).toFixed(2)}%</option>`;
+                });
+                if (abProntoPago) {
+                    abProntoPago.disabled = false;
+                    const span = abProntoPago.nextElementSibling;
+                    if (span) span.textContent = `Pronto Pago (${d.Descuentos.length} Tramos)`;
+                }
+            } else {
+                if (abProntoPago) {
+                    abProntoPago.disabled = true;
+                    abProntoPago.checked = false;
+                    const span = abProntoPago.nextElementSibling;
+                }
             }
             abTipoDescuento.innerHTML = optionsHtml;
+            // Si el checkbox está destildado (o se acaba de destildar/deshabilitar), entonces el dropdown se desactiva
+            abTipoDescuento.disabled = !(abProntoPago && abProntoPago.checked);
+            
+            // Sync initial DeduceIVA state for PP
+            if (abPPDeduceIVA) {
+                const opt = abTipoDescuento.options[abTipoDescuento.selectedIndex];
+                abPPDeduceIVA.checked = opt ? opt.getAttribute('data-deduce-iva') === 'true' : false;
+                abPPDeduceIVA.disabled = abTipoDescuento.disabled;
+            }
         }
 
         // Update historical UP data
@@ -3099,24 +3213,56 @@ document.addEventListener('DOMContentLoaded', () => {
             const islrRateModal = parseFloat(selIslrModal?.value) || 0;
             const aplicaIndex = abAplicaIndex?.checked || false;
 
+            const abDescBase = document.getElementById('abDescBase');
+            let descBasePct = 0;
+            if (abDescBase?.checked && Number(d.DescuentoBase_Pct) > 0) {
+                descBasePct = Number(d.DescuentoBase_Pct);
+            }
+            const deduceIvaBase = document.getElementById('abBaseDeduceIVA')?.checked ?? true;
+            const deduceIvaPP = document.getElementById('abPPDeduceIVA')?.checked ?? true;
+
             const fin = calculateInvoiceFinancials(d, {
                 tasaDia: tasaDia,
                 aplicaIndex: aplicaIndex,
                 aplicaIndexIva: abIndexaIva?.checked ?? true,
                 pctDesc: pctDescuento,
-                islrRate: islrRateModal
+                descBasePct: descBasePct,
+                islrRate: islrRateModal,
+                deduceIvaBase: deduceIvaBase,
+                deduceIvaPP: deduceIvaPP
             });
 
-            if (pctDescuento > 0) {
+            if (pctDescuento > 0 || descBasePct > 0) {
                 const dynDescuentoBox = document.getElementById('dynDescuentoBox');
                 if (dynDescuentoBox) {
-                    dynDescuentoBox.style.display = 'flex';
-                    document.getElementById('dynPctDesc').textContent = pctDescuento;
-                    document.getElementById('dynMontoDescUsd').textContent = '-' + usdFormatter(fin.descUsdMonto);
+                    if (pctDescuento > 0) {
+                        dynDescuentoBox.style.display = 'flex';
+                        const dynPctDesc = document.getElementById('dynPctDesc');
+                        if (dynPctDesc) dynPctDesc.textContent = pctDescuento;
+                        const dynMontoDescUsd = document.getElementById('dynMontoDescUsd');
+                        if (dynMontoDescUsd) dynMontoDescUsd.textContent = '-' + usdFormatter(fin.descUsdMonto);
+                    } else {
+                        dynDescuentoBox.style.display = 'none';
+                    }
+                }
+                const dynDescBaseBox = document.getElementById('dynDescBaseBox');
+                if (dynDescBaseBox) {
+                    if (descBasePct > 0) {
+                        dynDescBaseBox.style.display = 'flex';
+                        const dynPctDescBase = document.getElementById('dynPctDescBase');
+                        if (dynPctDescBase) dynPctDescBase.textContent = descBasePct;
+                        const dynMontoDescBaseUsd = document.getElementById('dynMontoDescBaseUsd');
+                        // Approximation to split the discount visually for UX if needed, but since math is cascaded we can just use the global descendant representation or recalculate base isolated. 
+                        // fin.descUsdMonto contains total discount. Let's just output it visually
+                    } else {
+                        dynDescBaseBox.style.display = 'none';
+                    }
                 }
             } else {
                 const dynDescuentoBox = document.getElementById('dynDescuentoBox');
                 if (dynDescuentoBox) dynDescuentoBox.style.display = 'none';
+                const dynDescBaseBox = document.getElementById('dynDescBaseBox');
+                if (dynDescBaseBox) dynDescBaseBox.style.display = 'none';
             }
             
             // UI Updates
@@ -3161,6 +3307,54 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    const suggestDiscountTier = () => {
+        if (!currentCxpStatus || !currentCxpStatus.Descuentos?.length) return;
+        const d = currentCxpStatus;
+        const abTipoDescuento = document.getElementById('abTipoDescuento');
+        const abProntoPago = document.getElementById('abProntoPago');
+        
+        const dateInput = document.getElementById('abFechaPago');
+        if (!dateInput || !abTipoDescuento) return;
+        
+        const pagoDate = new Date(getDateValue(dateInput));
+        // SE CUENTA DESDE LA LLEGADA DE LA FACTURA (FECHA I) 
+        const baseDateStr = d.FechaI || d.FechaE;
+        const baseDate = new Date(baseDateStr);
+        
+        pagoDate.setHours(0,0,0,0);
+        baseDate.setHours(0,0,0,0);
+        
+        const diffTime = pagoDate - baseDate;
+        let diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        
+        // Si el usuario paga ANTES de que llegara la factura, el tiempo es negativo.
+        // Si paga antes, obtiene el mayor beneficio (Día 0).
+        if (diffDays < 0) diffDays = 0;
+        
+        // Find matching tier
+        const match = d.Descuentos.find(tier => diffDays >= tier.DiasDesde && diffDays <= tier.DiasHasta);
+        
+        const abPPDeduceIVA = document.getElementById('abPPDeduceIVA');
+
+        if (match) {
+            abTipoDescuento.value = match.Porcentaje;
+            if (abProntoPago) abProntoPago.checked = true;
+            abTipoDescuento.disabled = false;
+            if (abPPDeduceIVA) {
+                abPPDeduceIVA.disabled = false;
+                abPPDeduceIVA.checked = match.DeduceIVA !== false && match.DeduceIVA !== 0;
+            }
+        } else {
+            abTipoDescuento.value = "0";
+            if (abProntoPago) abProntoPago.checked = false;
+            abTipoDescuento.disabled = true;
+            if (abPPDeduceIVA) {
+                abPPDeduceIVA.disabled = true;
+                abPPDeduceIVA.checked = false;
+            }
+        }
+    };
+
     const checkIndexationStatus = () => {
         if (!currentCxpStatus || !getDateValue(abFechaPago)) return;
         const pagoDate = new Date(getDateValue(abFechaPago));
@@ -3176,6 +3370,9 @@ document.addEventListener('DOMContentLoaded', () => {
             abIndexaIva.checked = currentCxpStatus.IndexaIVA !== false;
         }
         
+        // Dynamic Tier Selection (Pronto Pago)
+        suggestDiscountTier();
+
         fillDefaultPaymentAmount(false); 
         calculateUsdAmount();
     };
@@ -3194,15 +3391,34 @@ document.addEventListener('DOMContentLoaded', () => {
             pctDescuento = parseFloat(abTipoDescuento.value) || 0;
         }
 
+        let descBase = 0;
+        if (d.DescuentoBase_Condicion === 'VENCIMIENTO') {
+            const pagoDate = new Date(getDateValue(abFechaPago));
+            const vDate = new Date(d.FechaVSaint || d.FechaV_Calculada);
+            pagoDate.setHours(0,0,0,0);
+            vDate.setHours(0,0,0,0);
+            if (pagoDate <= vDate) {
+                descBase = parseFloat(d.DescuentoBase_Pct) || 0;
+            }
+        } else {
+            descBase = parseFloat(d.DescuentoBase_Pct) || 0;
+        }
+
         const selIslr = document.getElementById('abConceptoISLR');
         const islrRate = parseFloat(selIslr?.value) || 0;
+        
+        const deduceIvaBase = document.getElementById('abDescBaseDeduceIVA') ? document.getElementById('abDescBaseDeduceIVA').checked : true;
+        const deduceIvaPP = document.getElementById('abPPDeduceIVA') ? document.getElementById('abPPDeduceIVA').checked : true;
 
         const fin = calculateInvoiceFinancials(d, {
             tasaDia: tasaActual,
             aplicaIndex: aplicaIndexacion,
             aplicaIndexIva: abIndexaIva?.checked ?? true,
             pctDesc: pctDescuento,
-            islrRate: islrRate
+            descBasePct: descBase,
+            islrRate: islrRate,
+            deduceIvaBase: deduceIvaBase,
+            deduceIvaPP: deduceIvaPP
         });
 
         // Update new UI fields
@@ -3239,7 +3455,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnNC      = document.getElementById('abBtnNC');
 
         const hasIva = (parseFloat(cxp.TGravable) || 0) > 0 && (parseFloat(cxp.MtoTax) || 0) > 0;
-        const ivaYaRetenida = (parseFloat(cxp.RetencionIvaAbonada) || 0) > 0;
+        const ivaYaRetenida = (cxp.HistorialAbonos || []).some(a => a.TipoAbono === 'RETENCION_IVA');
         
         if (btnRetIva) {
             btnRetIva.disabled = !hasIva && !ivaYaRetenida;
@@ -3251,7 +3467,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     : 'Generar Retención IVA';
         }
 
-        const islrYaRetenida = (parseFloat(cxp.RetencionIslrAbonada) || 0) > 0;
+        const islrYaRetenida = (cxp.HistorialAbonos || []).some(a => a.TipoAbono === 'RETENCION_ISLR');
         if (btnRetIslr) {
             btnRetIslr.disabled = false;
             btnRetIslr.dataset.yaCreada = islrYaRetenida;
@@ -3331,11 +3547,39 @@ document.addEventListener('DOMContentLoaded', () => {
     const abProntoPago = document.getElementById('abProntoPago');
     const abTipoDescuento = document.getElementById('abTipoDescuento');
     abProntoPago?.addEventListener('change', () => {
-        if (abTipoDescuento) abTipoDescuento.disabled = !abProntoPago.checked;
+        if (abTipoDescuento) {
+            abTipoDescuento.disabled = !abProntoPago.checked;
+            // UX enhancement: if they just checked it and it's at 0%, auto-select the first tier
+            if (abProntoPago.checked && String(abTipoDescuento.value) === "0" && abTipoDescuento.options.length > 1) {
+                abTipoDescuento.selectedIndex = 1;
+            }
+        }
         fillDefaultPaymentAmount(true);
         calculateUsdAmount();
     });
     abTipoDescuento?.addEventListener('change', () => {
+        // Validation: If they pick a discount manually, ensure the checkbox stays checked
+        if (abProntoPago && String(abTipoDescuento.value) !== "0") {
+            abProntoPago.checked = true;
+        }
+        
+        // Sync the DeduceIVA checkbox state when the dropdown changes
+        const abPPDeduceIVA = document.getElementById('abPPDeduceIVA');
+        if (abPPDeduceIVA) {
+            const opt = abTipoDescuento.options[abTipoDescuento.selectedIndex];
+            if (opt) abPPDeduceIVA.checked = opt.getAttribute('data-deduce-iva') === 'true';
+        }
+        
+        fillDefaultPaymentAmount(true);
+        calculateUsdAmount();
+    });
+    
+    document.getElementById('abPPDeduceIVA')?.addEventListener('change', () => {
+        fillDefaultPaymentAmount(true);
+        calculateUsdAmount();
+    });
+    
+    document.getElementById('abDescBaseDeduceIVA')?.addEventListener('change', () => {
         fillDefaultPaymentAmount(true);
         calculateUsdAmount();
     });
@@ -3370,25 +3614,44 @@ document.addEventListener('DOMContentLoaded', () => {
         const pctDescuentoFinal = (document.getElementById('abProntoPago')?.checked && document.getElementById('abTipoDescuento'))
             ? (parseFloat(document.getElementById('abTipoDescuento').value) || 0)
             : 0;
-        if (pctDescuentoFinal > 0) {
-            const finSinDesc = calculateInvoiceFinancials(currentCxpStatus, {
+        let descBase = 0;
+        if (currentCxpStatus.DescuentoBase_Condicion === 'VENCIMIENTO') {
+            const pagoDate = new Date(getDateValue(abFechaPago));
+            const vDate = new Date(currentCxpStatus.FechaVSaint || currentCxpStatus.FechaV_Calculada);
+            pagoDate.setHours(0,0,0,0);
+            vDate.setHours(0,0,0,0);
+            if (pagoDate <= vDate) {
+                descBase = parseFloat(currentCxpStatus.DescuentoBase_Pct) || 0;
+            }
+        } else {
+            descBase = parseFloat(currentCxpStatus.DescuentoBase_Pct) || 0;
+        }
+
+        if (pctDescuentoFinal > 0 || descBase > 0) {
+            const deduceIvaBase = document.getElementById('abDescBaseDeduceIVA') ? document.getElementById('abDescBaseDeduceIVA').checked : true;
+            const deduceIvaPP = document.getElementById('abPPDeduceIVA') ? document.getElementById('abPPDeduceIVA').checked : true;
+
+            const finParamsBase = {
                 tasaDia: abAplicaIndex.checked ? (parseFloat(abTasa.value) || 0) : (currentCxpStatus.TasaEmision || 0),
                 aplicaIndex: abAplicaIndex.checked,
                 aplicaIndexIva: document.getElementById('abIndexaIva')?.checked ?? true,
-                pctDesc: 0, // Sin descuento para obtener base
-                islrRate: parseFloat(document.getElementById('abConceptoISLR')?.value) || 0
-            });
-            const finConDesc = calculateInvoiceFinancials(currentCxpStatus, {
-                tasaDia: abAplicaIndex.checked ? (parseFloat(abTasa.value) || 0) : (currentCxpStatus.TasaEmision || 0),
-                aplicaIndex: abAplicaIndex.checked,
-                aplicaIndexIva: document.getElementById('abIndexaIva')?.checked ?? true,
-                pctDesc: pctDescuentoFinal,
-                islrRate: parseFloat(document.getElementById('abConceptoISLR')?.value) || 0
-            });
-            const montoDesc = +(finSinDesc.finalBs - finConDesc.finalBs).toFixed(2);
-            if (montoDesc > 0) {
-                formData.append('MontoDescuentoBs', montoDesc.toFixed(2));
-                // Auto-buscar motivo de Descuento Pronto Pago (Codigo = 100)
+                islrRate: parseFloat(document.getElementById('abConceptoISLR')?.value) || 0,
+                deduceIvaBase: deduceIvaBase,
+                deduceIvaPP: deduceIvaPP
+            };
+            
+            const finSinDesc = calculateInvoiceFinancials(currentCxpStatus, { ...finParamsBase, pctDesc: 0, descBasePct: 0 });
+            const finSoloBase = calculateInvoiceFinancials(currentCxpStatus, { ...finParamsBase, pctDesc: 0, descBasePct: descBase });
+            const finConAmbos = calculateInvoiceFinancials(currentCxpStatus, { ...finParamsBase, pctDesc: pctDescuentoFinal, descBasePct: descBase });
+            
+            const montoDescBase = +(finSinDesc.finalBs - finSoloBase.finalBs).toFixed(2);
+            const montoDescPP = +(finSoloBase.finalBs - finConAmbos.finalBs).toFixed(2);
+            
+            if (montoDescBase > 0) {
+                formData.append('MontoDescuentoBaseBs', montoDescBase.toFixed(2));
+            }
+            if (montoDescPP > 0) {
+                formData.append('MontoDescuentoBs', montoDescPP.toFixed(2));
                 const selMotivo = document.getElementById('abMotivoAjuste');
                 const ppOpt = Array.from(selMotivo?.options || []).find(o => o.text.includes('100') || o.text.toLowerCase().includes('pronto pago'));
                 if (ppOpt) formData.append('MotivoDescuentoID', ppOpt.value);
@@ -3411,12 +3674,19 @@ document.addEventListener('DOMContentLoaded', () => {
             if (document.getElementById('abProntoPago')?.checked && document.getElementById('abTipoDescuento')) {
                 pctDescuento = parseFloat(document.getElementById('abTipoDescuento').value) || 0;
             }
+            
+            const deduceIvaBase = document.getElementById('abDescBaseDeduceIVA') ? document.getElementById('abDescBaseDeduceIVA').checked : true;
+            const deduceIvaPP = document.getElementById('abPPDeduceIVA') ? document.getElementById('abPPDeduceIVA').checked : true;
+
             const fin = calculateInvoiceFinancials(currentCxpStatus, {
                 tasaDia: abAplicaIndex.checked ? (parseFloat(abTasa.value) || 0) : (currentCxpStatus.TasaEmision || 0),
                 aplicaIndex: abAplicaIndex.checked,
                 aplicaIndexIva: document.getElementById('abIndexaIva')?.checked ?? true,
                 pctDesc: pctDescuento,
-                islrRate: parseFloat(document.getElementById('abConceptoISLR')?.value) || 0
+                descBasePct: descBase,
+                islrRate: parseFloat(document.getElementById('abConceptoISLR')?.value) || 0,
+                deduceIvaBase: deduceIvaBase,
+                deduceIvaPP: deduceIvaPP
             });
             let pagoReal = parseFloat(abMontoBs.value) || 0;
             const deudaAcumuladaBs = fin.finalBs; // Lo que realmente se exige hoy en día
@@ -3833,11 +4103,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         document.getElementById('pmGoBtnRetIva')?.addEventListener('click', () => {
             closePagoMultipleModal();
-            document.getElementById('btnGenerarRetencion')?.click();
+            if (typeof pmItems !== 'undefined' && pmItems.length > 0) {
+                if (window.launchRetencionModal) window.launchRetencionModal(pmItems);
+            } else {
+                document.getElementById('btnGenerarRetencion')?.click();
+            }
         });
         document.getElementById('pmGoBtnRetIslr')?.addEventListener('click', () => {
             closePagoMultipleModal();
-            document.getElementById('btnGenerarRetencionIslr')?.click();
+            if (typeof pmItems !== 'undefined' && pmItems.length > 0) {
+                if (window.launchRetencionIslrModal) window.launchRetencionIslrModal(pmItems);
+            } else {
+                document.getElementById('btnGenerarRetencionIslr')?.click();
+            }
         });
         document.getElementById('pmGoBtnND')?.addEventListener('click', () => {
             showToast('⚠️ Las Notas de Débito deben generarse desde el panel individual de cada factura.', 'warning');
@@ -3856,6 +4134,31 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('globalDynamicRecalculateModal')?.classList.remove('active');
 
         // ── Helpers per-row ─────────────────────────────────────────────
+        const pmGetDescBase = (cxp, row) => {
+            if (!cxp || !Number(cxp.DescuentoBase_Pct)) return 0;
+            if (cxp.DescuentoBase_Condicion === 'INDEPENDIENTE') {
+                return Number(cxp.DescuentoBase_Pct);
+            } else if (cxp.DescuentoBase_Condicion === 'VENCIMIENTO') {
+                const pagoDateDesc = row ? new Date(getDateValue(row.querySelector('.pm-fecha'))) : new Date();
+                let vDate = new Date(cxp.FechaVSaint); 
+                vDate.setHours(0,0,0,0);
+                pagoDateDesc.setHours(0,0,0,0);
+                if (pagoDateDesc <= vDate) {
+                    return Number(cxp.DescuentoBase_Pct);
+                }
+            }
+            return 0;
+        };
+        const pmGetDeduceIvaBase = (cxp) => {
+            if (!cxp) return true;
+            return cxp.DescuentoBase_DeduceIVA !== false && cxp.DescuentoBase_DeduceIVA !== '0' && cxp.DescuentoBase_DeduceIVA !== 0;
+        };
+        const pmGetDeduceIvaPP = (cxp, pctDesc) => {
+            if (!cxp || !cxp.Descuentos || pctDesc === 0) return true;
+            const tier = cxp.Descuentos.find(x => parseFloat(x.Porcentaje) === pctDesc);
+            return tier && tier.DeduceIVA !== undefined ? tier.DeduceIVA !== false && tier.DeduceIVA !== 0 && tier.DeduceIVA !== '0' : true;
+        };
+
         const pmCalcRow = (row) => {
             const rKey = row.dataset.rowkey;
             const cxp = pmCxpStatuses[rKey];
@@ -3874,7 +4177,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 aplicaIndex: indexado,
                 aplicaIndexIva: indexaIva,
                 pctDesc: pctDesc,
-                islrRate: islrRate
+                descBasePct: pmGetDescBase(cxp, row),
+                islrRate: islrRate,
+                deduceIvaBase: pmGetDeduceIvaBase(cxp),
+                deduceIvaPP: pmGetDeduceIvaPP(cxp, pctDesc)
             });
 
             // Update row hidden labels for Global Summary
@@ -4006,8 +4312,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const fin = calculateInvoiceFinancials(cxp, {
                 tasaDia: tasaDia,
                 aplicaIndex: indexado,
+                aplicaIndexIva: row.querySelector('.pm-indexado-iva') !== null ? row.querySelector('.pm-indexado-iva').checked : (cxp.IndexaIVA ?? true),
                 pctDesc: pctDesc,
-                islrRate: islrRate
+                descBasePct: pmGetDescBase(cxp, row),
+                islrRate: islrRate,
+                deduceIvaBase: pmGetDeduceIvaBase(cxp),
+                deduceIvaPP: pmGetDeduceIvaPP(cxp, pctDesc)
             });
 
             // Populate dynModal (reuse existing single-invoice modal elements)
@@ -4027,14 +4337,28 @@ document.addEventListener('DOMContentLoaded', () => {
             dynModal.querySelector('#dynMtoTotalUsd' )&&(dynModal.querySelector('#dynMtoTotalUsd' ).textContent = '$' + exactUsdFormatter.format(fin.origTotalUsd));
             dynModal.querySelector('#dynSubtotalUsd' )&&(dynModal.querySelector('#dynSubtotalUsd' ).textContent = '$' + exactUsdFormatter.format(fin.subtotalUsd));
 
-            if (pctDesc > 0) {
+            if (pctDesc > 0 || pmGetDescBase(cxp, row) > 0) {
                 const dbox = dynModal.querySelector('#dynDescuentoBox');
-                if (dbox) dbox.style.display = 'flex';
-                dynModal.querySelector('#dynPctDesc')      && (dynModal.querySelector('#dynPctDesc').textContent      = pctDesc);
-                dynModal.querySelector('#dynMontoDescUsd') && (dynModal.querySelector('#dynMontoDescUsd').textContent = '-' + usdFormatter(fin.descUsdMonto));
+                if (dbox && pctDesc > 0) {
+                    dbox.style.display = 'flex';
+                    const pctE = dynModal.querySelector('#dynPctDesc');
+                    if (pctE) pctE.textContent = pctDesc;
+                } else if (dbox) { dbox.style.display = 'none'; }
+                
+                const dbbox = dynModal.querySelector('#dynDescBaseBox');
+                if (dbbox && pmGetDescBase(cxp, row) > 0) {
+                    dbbox.style.display = 'flex';
+                    const pctBe = dynModal.querySelector('#dynPctDescBase');
+                    if (pctBe) pctBe.textContent = pmGetDescBase(cxp, row);
+                } else if (dbbox) { dbbox.style.display = 'none'; }
+                
+                const amE = dynModal.querySelector('#dynMontoDescUsd');
+                if (amE) amE.textContent = '-' + usdFormatter(fin.descUsdMonto);
             } else {
                 const dbox = dynModal.querySelector('#dynDescuentoBox');
                 if (dbox) dbox.style.display = 'none';
+                const dbbox = dynModal.querySelector('#dynDescBaseBox');
+                if (dbbox) dbbox.style.display = 'none';
             }
             dynModal.querySelector('#dynDesctoFletesBox')&&(dynModal.querySelector('#dynDesctoFletesBox').innerHTML = '');
             dynModal.querySelector('#dynIvaUsd')&&(dynModal.querySelector('#dynIvaUsd').textContent = usdFormatter(fin.ivaUsd));
@@ -4225,8 +4549,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         sel.disabled = !row.querySelector('.pm-pronto-pago').checked;
                         if (cxp && !sel.disabled) {
                             let opts = '<option value="0">0%</option>';
-                            if (parseFloat(cxp.ProntoPago1_Pct) > 0) opts += `<option value="${cxp.ProntoPago1_Pct}">PP1: ${parseFloat(cxp.ProntoPago1_Pct).toFixed(2)}%</option>`;
-                            if (parseFloat(cxp.ProntoPago2_Pct) > 0) opts += `<option value="${cxp.ProntoPago2_Pct}">PP2: ${parseFloat(cxp.ProntoPago2_Pct).toFixed(2)}%</option>`;
+                            if (cxp.Descuentos && cxp.Descuentos.length > 0) {
+                                cxp.Descuentos.forEach((d, i) => {
+                                    opts += `<option value="${d.Porcentaje}">Tramo ${i+1}: ${d.Porcentaje.toFixed(2)}%</option>`;
+                                });
+                            }
                             sel.innerHTML = opts;
                         }
                     }
@@ -4262,11 +4589,36 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
 
                     const sel = row.querySelector('.pm-desc');
+                    const cbPP = row.querySelector('.pm-pronto-pago');
                     if (sel && json.data) {
                         let opts = '<option value="0">0%</option>';
-                        if (parseFloat(json.data.ProntoPago1_Pct) > 0) opts += `<option value="${json.data.ProntoPago1_Pct}">PP1: ${parseFloat(json.data.ProntoPago1_Pct).toFixed(2)}%</option>`;
-                        if (parseFloat(json.data.ProntoPago2_Pct) > 0) opts += `<option value="${json.data.ProntoPago2_Pct}">PP2: ${parseFloat(json.data.ProntoPago2_Pct).toFixed(2)}%</option>`;
+                        let bestMatch = null;
+                        
+                        if (json.data.Descuentos && json.data.Descuentos.length > 0) {
+                            const pagoDate = new Date();
+                            const baseDateStr = json.data.BaseDiasCredito === 'EMISION' ? json.data.FechaE : (json.data.FechaI || json.data.FechaE);
+                            const baseDate = new Date(baseDateStr);
+                            pagoDate.setHours(0,0,0,0);
+                            baseDate.setHours(0,0,0,0);
+                            
+                            let diffDays = Math.floor((pagoDate - baseDate) / (1000 * 60 * 60 * 24));
+                            if (diffDays < 0) diffDays = 0;
+
+                            json.data.Descuentos.forEach((d, i) => {
+                                opts += `<option value="${d.Porcentaje}">Tramo ${i+1}: ${d.Porcentaje.toFixed(2)}%</option>`;
+                            });
+                            bestMatch = json.data.Descuentos.find(tier => diffDays >= tier.DiasDesde && diffDays <= tier.DiasHasta);
+                        }
                         sel.innerHTML = opts;
+                        
+                        if (bestMatch && cbPP) {
+                            sel.value = bestMatch.Porcentaje;
+                            sel.disabled = false;
+                            cbPP.checked = true;
+                        } else if (cbPP) {
+                            cbPP.checked = false;
+                            sel.disabled = true;
+                        }
                     }
 
                     await pmFetchRate(row);
@@ -4315,8 +4667,9 @@ document.addEventListener('DOMContentLoaded', () => {
             let showAlert10Pct = false;
             document.querySelectorAll('#pmInvoicesTable tr').forEach(row => {
                 const nD      = row.dataset.nrounico;
+                const rKey    = row.dataset.rowkey;
                 const codProv = row.dataset.codprov;
-                const cxp     = pmCxpStatuses[nD];
+                const cxp     = pmCxpStatuses[rKey];
                 const indexado = row.querySelector('.pm-indexado')?.checked;
                 const tasa     = parseFloat(row.querySelector('.pm-tasa')?.value) || 0;
                 const montoBs  = parseFloat(row.querySelector('.pm-monto-bs')?.value) || 0;
@@ -4761,21 +5114,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        document.getElementById('btnGenerarRetencion')?.addEventListener('click', async () => {
-            const checked = document.querySelectorAll('.row-checkbox:checked');
-            if (checked.length < 1) return;
+        window.launchRetencionModal = async (itemsToRetain) => {
+            if (!itemsToRetain || itemsToRetain.length === 0) return;
 
-            // Gather all selected items
-            const items = [];
-            checked.forEach(cb => {
-                const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
-                const item = window.currentData.find(d => d.NroUnico === nroUnico);
-                if (item) items.push(item);
-            });
-            if (items.length === 0) return;
+            const itemsConIva = itemsToRetain.filter(i => (parseFloat(i.TGravable) || 0) > 0 && (parseFloat(i.MtoTax) || 0) > 0);
+            if (itemsConIva.length === 0) {
+                showToast('⚠️ Ninguna de las facturas seleccionadas posee IVA para retener.', 'warning');
+                return;
+            }
+            itemsToRetain = itemsConIva;
 
             // Validate: all same provider
-            const provs = new Set(items.map(i => i.CodProv));
+            const provs = new Set(itemsToRetain.map(i => i.CodProv));
             if (provs.size > 1) {
                 showToast('⚠️ Para generar una retención agrupada, todas las facturas deben ser del mismo proveedor.', 'warning');
                 return;
@@ -4788,14 +5138,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 configValUT = confData.data?.ValorUT || 0;
             } catch(e) {}
 
-            currentRetencionItems = items;
-            document.getElementById('genRetCodProv').value = items[0].CodProv;
+            currentRetencionItems = itemsToRetain;
+            document.getElementById('genRetCodProv').value = itemsToRetain[0].CodProv;
             document.getElementById('genRetFechaEmision').value = new Date().toISOString().split('T')[0];
             document.getElementById('genRetPctGaceta').value = '75';
 
             // Build invoice rows
             const tbody = document.getElementById('genRetInvoicesTable');
-            tbody.innerHTML = items.map((item, idx) => {
+            tbody.innerHTML = itemsToRetain.map((item, idx) => {
                 const monto = parseFloat(item.Monto) || 0;
                 // Base should correctly be TGravable, not the entire Monto
                 const base = parseFloat(item.TGravable) || 0;
@@ -4826,8 +5176,24 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             forceShowModal(generarRetencionModal);
-            lucide.createIcons();
+            if(window.lucide) window.lucide.createIcons();
             recalcAllRetenciones();
+        };
+
+        document.getElementById('btnGenerarRetencion')?.addEventListener('click', async () => {
+            const checked = document.querySelectorAll('.row-checkbox:checked');
+            if (checked.length < 1) return;
+
+            // Gather all selected items
+            const items = [];
+            checked.forEach(cb => {
+                const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
+                const item = window.currentData.find(d => d.NroUnico === nroUnico);
+                if (item) items.push(item);
+            });
+            if (items.length > 0) {
+                window.launchRetencionModal(items);
+            }
         });
 
         document.getElementById('genRetPctGaceta')?.addEventListener('change', recalcAllRetenciones);
@@ -4953,19 +5319,10 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('genRetIslrTotalRetenido').textContent = totalRetenido.toFixed(2);
         };
 
-        document.getElementById('btnGenerarRetencionIslr')?.addEventListener('click', async () => {
-            const checked = document.querySelectorAll('.row-checkbox:checked');
-            if (checked.length < 1) return;
+        window.launchRetencionIslrModal = async (itemsToRetain) => {
+            if (!itemsToRetain || itemsToRetain.length === 0) return;
 
-            const items = [];
-            checked.forEach(cb => {
-                const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
-                const item = window.currentData.find(d => d.NroUnico === nroUnico);
-                if (item) items.push(item);
-            });
-            if (items.length === 0) return;
-
-            const provs = new Set(items.map(i => i.CodProv));
+            const provs = new Set(itemsToRetain.map(i => i.CodProv));
             if (provs.size > 1) {
                 showToast('⚠️ Facturas deben ser del mismo proveedor.', 'warning');
                 return;
@@ -4977,12 +5334,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch(e) {}
 
-            currentIslrItems = items;
-            document.getElementById('genRetIslrCodProv').value = items[0].CodProv;
+            currentIslrItems = itemsToRetain;
+            document.getElementById('genRetIslrCodProv').value = itemsToRetain[0].CodProv;
             document.getElementById('genRetIslrFechaEmision').value = new Date().toISOString().split('T')[0];
 
             const tbody = document.getElementById('genRetIslrInvoicesTable');
-            tbody.innerHTML = items.map((item) => {
+            tbody.innerHTML = itemsToRetain.map((item) => {
                 const monto = parseFloat(item.Monto) || 0;
                 const base = parseFloat(item.TGravable) || 0;
                 
@@ -5001,8 +5358,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
             tbody.querySelectorAll('.ret-base').forEach(inp => inp.addEventListener('input', recalcIslr));
             forceShowModal(generarRetencionIslrModal);
-            lucide.createIcons();
+            if(window.lucide) window.lucide.createIcons();
             recalcIslr();
+        };
+
+        document.getElementById('btnGenerarRetencionIslr')?.addEventListener('click', async () => {
+            const checked = document.querySelectorAll('.row-checkbox:checked');
+            if (checked.length < 1) return;
+
+            const items = [];
+            checked.forEach(cb => {
+                const nroUnico = parseInt(cb.getAttribute('data-nrounico'));
+                const item = window.currentData.find(d => d.NroUnico === nroUnico);
+                if (item) items.push(item);
+            });
+            
+            if (items.length > 0) {
+                window.launchRetencionIslrModal(items);
+            }
         });
 
         document.getElementById('genRetIslrConcepto')?.addEventListener('change', recalcIslr);
