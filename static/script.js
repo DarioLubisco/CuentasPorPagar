@@ -3722,7 +3722,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const fileInput = document.getElementById('abComprobante');
         if (fileInput && fileInput.files.length > 0) {
-            formData.append('archivo', fileInput.files[0]);
+            Array.from(fileInput.files).forEach(f => formData.append('archivos', f));
         }
 
         const btn = abonoForm.querySelector('button[type="submit"]');
@@ -3782,7 +3782,9 @@ document.addEventListener('DOMContentLoaded', () => {
             fd.append('NumeroD', abNumeroD.value);
             fd.append('CodProv', abCodProv.value);
             const fileInput = document.getElementById('abComprobante');
-            if (fileInput && fileInput.files.length > 0) fd.append('archivo', fileInput.files[0]);
+            if (fileInput && fileInput.files.length > 0) {
+                Array.from(fileInput.files).forEach(f => fd.append('archivos', f));
+            }
             const res = await fetch('/api/procurement/send-email', { method: 'POST', body: fd });
             const json = await res.json();
             if (json.email_sent !== false) {
@@ -4763,8 +4765,9 @@ document.addEventListener('DOMContentLoaded', () => {
             formData.append('pagos_json', JSON.stringify(pagos));
             formData.append('NotificarCorreo', notificar);
             formData.append('MontoTotalPagado', parseFloat(document.getElementById('pmMontoTotalReal')?.value) || 0);
-            if (fileInput && fileInput.files.length > 0) formData.append('archivo', fileInput.files[0]);
-
+            if (fileInput && fileInput.files.length > 0) {
+                Array.from(fileInput.files).forEach(f => formData.append('archivos', f));
+            }
             try {
                 const res = await fetch('/api/procurement/abonos-batch', { method: 'POST', body: formData });
                 if (!res.ok) {
@@ -4799,7 +4802,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const fileInput = document.getElementById('pmComprobante');
                 const fd = new FormData();
                 fd.append('pagos_json', JSON.stringify(lastProcessedPagos));
-                if (fileInput && fileInput.files.length > 0) fd.append('archivo', fileInput.files[0]);
+                if (fileInput && fileInput.files.length > 0) {
+                    Array.from(fileInput.files).forEach(f => fd.append('archivos', f));
+                }
                 const res = await fetch('/api/procurement/send-email-batch', { method: 'POST', body: fd });
                 const json = await res.json();
                 if (json.email_sent !== false) {

@@ -582,7 +582,7 @@ async def update_provider_condition(cod_prov: str, payload: ProveedorCondicion):
         if 'conn' in locals():
             conn.close()
 
-def enviar_correo_pago(destinatario: str, proveedor_nombre: str, nro_factura: str, pago_data, filepath: str):
+def enviar_correo_pago(destinatario: str, proveedor_nombre: str, nro_factura: str, pago_data, filepaths=None):
     """Send payment notification via Gmail API.
     pago_data can be a single dict or a list of dicts (for multi-invoice payments).
     Supports multiple recipients separated by ';' in destinatario.
@@ -662,34 +662,124 @@ El equipo de Administracion."""
         money_fmt = '#,##0.00'
         rate_fmt = '#,##0.0000'
         
-        for row_idx, p in enumerate(pagos_list, 2):
+        # Fetch retentions to include them in the excel balance
+        rets_iva = {}
+        rets_islr = {}
+        try:
+            import database
+            conn_ret_xl = database.get_db_connection()
+            csr_xl = conn_ret_xl.cursor()
+            numeros_d_xl = [p.get('NumeroD') for p in pagos_list if p.get('NumeroD')]
+            cod_prov_xl = pagos_list[0].get('CodProv') if pagos_list else None
+            
+            if numeros_d_xl and cod_prov_xl:
+                placeholders = ','.join(['?'] * len(numeros_d_xl))
+                csr_xl.execute(f"SELECT NumeroD, SUM(ISNULL(MontoRetenido, 0)) FROM EnterpriseAdmin_AMC.Procurement.Retenciones_IVA WHERE CodProv = ? AND NumeroD IN ({placeholders}) AND Estado <> 'ANULADO' GROUP BY NumeroD", [cod_prov_xl] + numeros_d_xl)
+                for r_ in csr_xl.fetchall(): rets_iva[r_[0]] = float(r_[1])
+                
+                csr_xl.execute(f"SELECT NumeroD, SUM(ISNULL(MontoRetenido, 0)) FROM EnterpriseAdmin_AMC.Procurement.Retenciones_ISLR WHERE CodProv = ? AND NumeroD IN ({placeholders}) AND Estado <> 'ANULADO' GROUP BY NumeroD", [cod_prov_xl] + numeros_d_xl)
+                for r_ in csr_xl.fetchall(): rets_islr[r_[0]] = float(r_[1])
+        except Exception as e:
+            logging.error(f"Error cargando retenciones excel: {e}")
+        finally:
+            if 'conn_ret_xl' in locals(): conn_ret_xl.close()
+
+        row_idx = 2
+        sum_bs = 0.0
+        sum_usd = 0.0
+        
+        for p in pagos_list:
             ws.cell(row=row_idx, column=1, value=p.get('NumeroD', '')).font = data_font
             ws.cell(row=row_idx, column=2, value=p.get('Referencia', '')).font = data_font
             ws.cell(row=row_idx, column=3, value=p.get('FechaAbono', '')).font = data_font
             
-            c_bs = ws.cell(row=row_idx, column=4, value=float(p.get('MontoBsAbonado', 0)))
+            monto_bs = float(p.get('MontoBsAbonado', 0))
+            tasa = float(p.get('TasaCambioDiaAbono', 0))
+            monto_usd = float(p.get('MontoUsdAbonado', 0))
+            
+            sum_bs += monto_bs
+            sum_usd += monto_usd
+            
+            c_bs = ws.cell(row=row_idx, column=4, value=monto_bs)
             c_bs.font = data_font
             c_bs.number_format = money_fmt
             c_bs.alignment = Alignment(horizontal='right')
             
-            c_tasa = ws.cell(row=row_idx, column=5, value=float(p.get('TasaCambioDiaAbono', 0)))
+            c_tasa = ws.cell(row=row_idx, column=5, value=tasa)
             c_tasa.font = data_font
             c_tasa.number_format = rate_fmt
             c_tasa.alignment = Alignment(horizontal='right')
             
             ws.cell(row=row_idx, column=6, value=p.get('AplicaIndexacion', 'No')).font = data_font
             
-            c_usd = ws.cell(row=row_idx, column=7, value=float(p.get('MontoUsdAbonado', 0)))
+            c_usd = ws.cell(row=row_idx, column=7, value=monto_usd)
             c_usd.font = data_font
             c_usd.number_format = money_fmt
             c_usd.alignment = Alignment(horizontal='right')
             
             for col in range(1, 8):
                 ws.cell(row=row_idx, column=col).border = thin_border
+            
+            row_idx += 1
+            
+            # Print Retencion IVA
+            num_d = p.get('NumeroD', '')
+            if num_d in rets_iva and rets_iva[num_d] > 0:
+                ret_bs = rets_iva[num_d]
+                ret_usd = (ret_bs / tasa) if tasa > 0 else 0.0
+                sum_bs += ret_bs
+                sum_usd += ret_usd
+                
+                ws.cell(row=row_idx, column=1, value=num_d).font = data_font
+                ws.cell(row=row_idx, column=2, value="Retención IVA").font = data_font
+                ws.cell(row=row_idx, column=3, value=p.get('FechaAbono', '')).font = data_font
+                
+                c_rbs = ws.cell(row=row_idx, column=4, value=ret_bs)
+                c_rbs.font = data_font; c_rbs.number_format = money_fmt; c_rbs.alignment = Alignment(horizontal='right')
+                
+                c_rtasa = ws.cell(row=row_idx, column=5, value=tasa)
+                c_rtasa.font = data_font; c_rtasa.number_format = rate_fmt; c_rtasa.alignment = Alignment(horizontal='right')
+                
+                ws.cell(row=row_idx, column=6, value="-").font = data_font
+                
+                c_rusd = ws.cell(row=row_idx, column=7, value=ret_usd)
+                c_rusd.font = data_font; c_rusd.number_format = money_fmt; c_rusd.alignment = Alignment(horizontal='right')
+                
+                for col in range(1, 8):
+                    ws.cell(row=row_idx, column=col).border = thin_border
+                
+                row_idx += 1
+                
+            # Print Retencion ISLR
+            if num_d in rets_islr and rets_islr[num_d] > 0:
+                ret_bs = rets_islr[num_d]
+                ret_usd = (ret_bs / tasa) if tasa > 0 else 0.0
+                sum_bs += ret_bs
+                sum_usd += ret_usd
+                
+                ws.cell(row=row_idx, column=1, value=num_d).font = data_font
+                ws.cell(row=row_idx, column=2, value="Retención ISLR").font = data_font
+                ws.cell(row=row_idx, column=3, value=p.get('FechaAbono', '')).font = data_font
+                
+                c_rbs = ws.cell(row=row_idx, column=4, value=ret_bs)
+                c_rbs.font = data_font; c_rbs.number_format = money_fmt; c_rbs.alignment = Alignment(horizontal='right')
+                
+                c_rtasa = ws.cell(row=row_idx, column=5, value=tasa)
+                c_rtasa.font = data_font; c_rtasa.number_format = rate_fmt; c_rtasa.alignment = Alignment(horizontal='right')
+                
+                ws.cell(row=row_idx, column=6, value="-").font = data_font
+                
+                c_rusd = ws.cell(row=row_idx, column=7, value=ret_usd)
+                c_rusd.font = data_font; c_rusd.number_format = money_fmt; c_rusd.alignment = Alignment(horizontal='right')
+                
+                for col in range(1, 8):
+                    ws.cell(row=row_idx, column=col).border = thin_border
+                
+                row_idx += 1
         
         # Totals row
-        if is_multi:
-            tot_row = len(pagos_list) + 2
+        if is_multi or rets_iva or rets_islr:
+            tot_row = row_idx
             total_font = Font(name='Calibri', bold=True, size=11)
             total_fill = PatternFill(start_color='D6E4F0', end_color='D6E4F0', fill_type='solid')
             
@@ -698,7 +788,7 @@ El equipo de Administracion."""
             for col in range(2, 4):
                 ws.cell(row=tot_row, column=col).fill = total_fill
             
-            c_total_bs = ws.cell(row=tot_row, column=4, value=sum(float(p.get('MontoBsAbonado', 0)) for p in pagos_list))
+            c_total_bs = ws.cell(row=tot_row, column=4, value=sum_bs)
             c_total_bs.font = total_font
             c_total_bs.fill = total_fill
             c_total_bs.number_format = money_fmt
@@ -707,7 +797,7 @@ El equipo de Administracion."""
             ws.cell(row=tot_row, column=5).fill = total_fill
             ws.cell(row=tot_row, column=6).fill = total_fill
             
-            c_total_usd = ws.cell(row=tot_row, column=7, value=sum(float(p.get('MontoUsdAbonado', 0)) for p in pagos_list))
+            c_total_usd = ws.cell(row=tot_row, column=7, value=sum_usd)
             c_total_usd.font = total_font
             c_total_usd.fill = total_fill
             c_total_usd.number_format = money_fmt
@@ -739,14 +829,51 @@ El equipo de Administracion."""
         part_excel.add_header("Content-Disposition", f"attachment; filename=Resumen_Pago_{fn_suffix}.xlsx")
         msg.attach(part_excel)
         
-        if filepath and os.path.exists(filepath):
-            with open(filepath, "rb") as attachment:
-                part = MIMEBase("application", "octet-stream")
-                part.set_payload(attachment.read())
-            encoders.encode_base64(part)
-            ext = os.path.splitext(filepath)[1]
-            part.add_header("Content-Disposition", f"attachment; filename=Comprobante_Pago_{fn_suffix}{ext}")
-            msg.attach(part)
+        import json as _json
+        all_att_paths = set()
+        
+        if isinstance(filepaths, list):
+            for fp in filepaths:
+                if fp: all_att_paths.add(fp)
+        elif filepaths:
+            all_att_paths.add(filepaths)
+            
+        numeros_d = [p.get('NumeroD') for p in pagos_list if p.get('NumeroD')]
+        cod_prov = pagos_list[0].get('CodProv') if pagos_list else None
+        
+        try:
+            if numeros_d and cod_prov:
+                import database
+                conn_hist = database.get_db_connection()
+                cursor_hist = conn_hist.cursor()
+                placeholders = ','.join(['?'] * len(numeros_d))
+                cursor_hist.execute(f"SELECT RutaComprobante FROM EnterpriseAdmin_AMC.dbo.CxP_Abonos WHERE CodProv = ? AND NumeroD IN ({placeholders}) AND RutaComprobante IS NOT NULL AND RutaComprobante <> ''", [cod_prov] + numeros_d)
+                for r in cursor_hist.fetchall():
+                    ruta = r[0]
+                    if ruta:
+                        ruta = ruta.strip()
+                        if ruta.startswith('['):
+                            try:
+                                paths = _json.loads(ruta)
+                                for p_ in paths:
+                                    if p_: all_att_paths.add(p_)
+                            except: pass
+                        else:
+                            all_att_paths.add(ruta)
+        except Exception as e:
+            logging.error(f"Error extraeyendo historial de comprobantes: {e}", exc_info=True)
+        finally:
+            if 'conn_hist' in locals(): conn_hist.close()
+            
+        for idx_att, fp in enumerate(all_att_paths):
+            if fp and os.path.exists(fp):
+                with open(fp, "rb") as attachment:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(attachment.read())
+                encoders.encode_base64(part)
+                ext = os.path.splitext(fp)[1]
+                part.add_header("Content-Disposition", f"attachment; filename=Soporte_{idx_att+1}_{fn_suffix}{ext}")
+                msg.attach(part)
         
         # ==========================================
         # ANEXAR RETENCIONES DE IVA E ISLR (SI EXISTEN y ESTAN GENERADAS)
@@ -755,8 +882,6 @@ El equipo de Administracion."""
             import database
             conn_ret = database.get_db_connection()
             cursor_ret = conn_ret.cursor()
-            numeros_d = [p.get('NumeroD') for p in pagos_list if p.get('NumeroD')]
-            cod_prov = pagos_list[0].get('CodProv') if pagos_list else None
             
             if numeros_d and cod_prov:
                 placeholders = ','.join(['?'] * len(numeros_d))
@@ -825,9 +950,9 @@ El equipo de Administracion."""
         return False
 
 # Helper: wrap email send so a network error doesn't crash the payment transaction
-def safe_send_email(destinatario: str, proveedor_nombre: str, nro_factura: str, pago_data, filepath: str) -> bool:
+def safe_send_email(destinatario: str, proveedor_nombre: str, nro_factura: str, pago_data, filepaths=None) -> bool:
     try:
-        return enviar_correo_pago(destinatario, proveedor_nombre, nro_factura, pago_data, filepath)
+        return enviar_correo_pago(destinatario, proveedor_nombre, nro_factura, pago_data, filepaths)
     except Exception as e:
         logging.warning(f"Email send failed (likely offline): {e}")
         return False
@@ -923,7 +1048,7 @@ async def registrar_abonos_batch(
     pagos_json: str = Form(...),
     NotificarCorreo: bool = Form(False),
     MontoTotalPagado: float = Form(0.0),
-    archivo: UploadFile = File(None)
+    archivos: List[UploadFile] = File(None)
 ):
     """Register multiple payments in one transaction and send one consolidated email."""
     import json as _json
@@ -935,13 +1060,18 @@ async def registrar_abonos_batch(
         conn = database.get_db_connection()
         cursor = conn.cursor()
         
-        filepath = None
-        if archivo and archivo.filename:
-            ext = os.path.splitext(archivo.filename)[1]
-            filename = f"{uuid.uuid4()}{ext}"
-            filepath = f"static/uploads/{filename}"
-            with open(filepath, "wb") as buffer:
-                shutil.copyfileobj(archivo.file, buffer)
+        filepaths = []
+        if archivos:
+            for archivo in archivos:
+                if archivo.filename:
+                    ext = os.path.splitext(archivo.filename)[1]
+                    filename = f"{uuid.uuid4()}{ext}"
+                    filepath = f"static/uploads/{filename}"
+                    with open(filepath, "wb") as buffer:
+                        shutil.copyfileobj(archivo.file, buffer)
+                    filepaths.append(filepath)
+        
+        rutas_json = _json.dumps(filepaths) if filepaths else ""
         
         # cursor.execute("BEGIN TRANSACTION;") # Rely on pyodbc autocommit=False default
         for p in pagos:
@@ -964,7 +1094,7 @@ async def registrar_abonos_batch(
                 max_abono_id, p['NumeroD'], p['CodProv'], p['FechaAbono'],
                 float(p.get('MontoBsAbonado', 0)), float(p.get('TasaCambioDiaAbono', 0)),
                 float(p.get('MontoUsdAbonado', 0)), aplica_idx,
-                p.get('Referencia', ''), filepath, 1 if NotificarCorreo else 0,
+                p.get('Referencia', ''), rutas_json, 1 if NotificarCorreo else 0,
                 tasa_orig, mto_orig
             ))
             
@@ -1118,7 +1248,7 @@ async def registrar_abono(
     NotificarCorreo: bool = Form(False),
     MontoTotalPagado: float = Form(0.0),
     force_send: bool = Form(False),
-    archivo: UploadFile = File(None),
+    archivos: List[UploadFile] = File(None),
     NroUnico: Optional[int] = Form(None),
     MontoAjusteBs: Optional[float] = Form(None),
     MotivoAjusteID: Optional[int] = Form(None),
@@ -1135,13 +1265,19 @@ async def registrar_abono(
         notificar = 1 if NotificarCorreo else 0
         force = 1 if force_send else 0
 
-        filepath = None
-        if archivo and archivo.filename:
-            ext = os.path.splitext(archivo.filename)[1]
-            filename = f"{uuid.uuid4()}{ext}"
-            filepath = f"static/uploads/{filename}"
-            with open(filepath, "wb") as buffer:
-                shutil.copyfileobj(archivo.file, buffer)
+        import json as _json
+        filepaths = []
+        if archivos:
+            for archivo in archivos:
+                if archivo.filename:
+                    ext = os.path.splitext(archivo.filename)[1]
+                    filename = f"{uuid.uuid4()}{ext}"
+                    filepath = f"static/uploads/{filename}"
+                    with open(filepath, "wb") as buffer:
+                        shutil.copyfileobj(archivo.file, buffer)
+                    filepaths.append(filepath)
+
+        rutas_json = _json.dumps(filepaths) if filepaths else ""
 
         # Phase 8: Mirror fields
         cursor.execute("SELECT Factor, MontoMEx FROM dbo.SACOMP WITH (NOLOCK) WHERE NumeroD = ? AND TipoCom = 'H'", (NumeroD,))
@@ -1161,7 +1297,7 @@ async def registrar_abono(
             max_abono_id, NumeroD, CodProv, FechaAbono,
             MontoBsAbonado, TasaCambioDiaAbono,
             MontoUsdAbonado, aplica_idx, Referencia,
-            filepath, notificar, tasa_orig, mto_orig
+            rutas_json, notificar, tasa_orig, mto_orig
         ))
         
         monto_total_reducir = MontoBsAbonado
@@ -1386,9 +1522,9 @@ async def eliminar_abono(id_abono: int):
         if 'conn' in locals(): conn.close()
 
 # Helper: wrap email send so a network error doesn't crash the payment transaction
-def safe_send_email(destinatario: str, proveedor_nombre: str, nro_factura: str, pago_data: dict, filepath: str) -> bool:
+def safe_send_email(destinatario: str, proveedor_nombre: str, nro_factura: str, pago_data: dict, filepaths=None) -> bool:
     try:
-        return enviar_correo_pago(destinatario, proveedor_nombre, nro_factura, pago_data, filepath)
+        return enviar_correo_pago(destinatario, proveedor_nombre, nro_factura, pago_data, filepaths)
     except Exception as e:
         logging.warning(f"Email send failed (likely offline): {e}")
         return False
@@ -1398,7 +1534,7 @@ def safe_send_email(destinatario: str, proveedor_nombre: str, nro_factura: str, 
 async def send_email_only(
     NumeroD: str = Form(...),
     CodProv: str = Form(...),
-    archivo: UploadFile = File(None)
+    archivos: List[UploadFile] = File(None)
 ):
     """Send a payment notification email for an existing invoice WITHOUT inserting a new payment record."""
     try:
@@ -1417,13 +1553,17 @@ async def send_email_only(
             return {"email_sent": False, "message": "Proveedor sin email configurado."}
 
         # Save attachment if provided
-        filepath = None
-        if archivo and archivo.filename:
-            ext = os.path.splitext(archivo.filename)[1]
-            filename = f"{uuid.uuid4()}{ext}"
-            filepath = f"static/uploads/{filename}"
-            with open(filepath, "wb") as buffer:
-                shutil.copyfileobj(archivo.file, buffer)
+        import json as _json
+        filepaths = []
+        if archivos:
+            for archivo in archivos:
+                if archivo.filename:
+                    ext = os.path.splitext(archivo.filename)[1]
+                    filename = f"{uuid.uuid4()}{ext}"
+                    filepath = f"static/uploads/{filename}"
+                    with open(filepath, "wb") as buffer:
+                        shutil.copyfileobj(archivo.file, buffer)
+                    filepaths.append(filepath)
 
         # Fetch last abono for context
         cursor.execute("""
@@ -1446,7 +1586,7 @@ async def send_email_only(
                 "Referencia": abono.Referencia or "Re-envio de soporte"
             }
             # Use the original comprobante if no new file was uploaded
-            attach = filepath or (str(abono.RutaComprobante) if abono.RutaComprobante else None)
+            attach = filepaths if filepaths else (str(abono.RutaComprobante) if abono.RutaComprobante else None)
         else:
             pago_data = {
                 "NumeroD": NumeroD, "CodProv": CodProv,
@@ -1454,7 +1594,7 @@ async def send_email_only(
                 "MontoUsdAbonado": 0, "TasaCambioDiaAbono": 0,
                 "AplicaIndexacion": "No", "Referencia": "Re-envio de soporte"
             }
-            attach = filepath
+            attach = filepaths
 
         sent = safe_send_email(row.Email, row.Descrip or "Proveedor", NumeroD, pago_data, attach) # type: ignore
         return {"email_sent": sent, "message": "Correo enviado." if sent else "No se pudo enviar el correo."}
